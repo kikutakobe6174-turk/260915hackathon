@@ -1,7 +1,7 @@
 # ひかり塾 定期テスト演習 準備＆記録システム（フロントエンド）
 
 集団授業塾向けの「学校別・定期テスト演習」準備＆記録システムの MVP フロントエンド（Next.js App Router + TypeScript）。
-バックエンドは別リポジトリ（`kikut/260915hackathon-back`, FastAPI + SQLAlchemy + SQLite）。このフロントエンドは単体では動作せず、バックエンドを先に起動しておく必要があります。
+バックエンド（FastAPI + SQLAlchemy + SQLite）は同リポジトリの [`backend/`](./backend/README.md) にあります。このフロントエンドは単体では動作せず、バックエンドを先に起動しておく必要があります。
 
 ## セットアップ
 
@@ -11,7 +11,7 @@ copy .env.local.example .env.local
 npm run dev
 ```
 
-`http://localhost:3000` で起動します。あらかじめバックエンド（`http://127.0.0.1:8000`）を起動しておいてください（`kikut/260915hackathon-back/backend` の README を参照）。
+`http://localhost:3000` で起動します。あらかじめバックエンド（`http://127.0.0.1:8000`）を起動しておいてください。手順は [`backend/README.md`](./backend/README.md) を参照してください。
 
 ## 環境変数（`.env.local`）
 

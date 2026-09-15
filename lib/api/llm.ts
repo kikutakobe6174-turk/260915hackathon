@@ -8,6 +8,8 @@ import type {
   SheetDraftResponse,
   TrendDraftRequest,
   TrendDraftResponse,
+  TrendProblemDraftRequest,
+  TrendProblemDraftResponse,
 } from "@/lib/types/api";
 
 // LLM系APIは処理に時間がかかりうるため呼び出し側でローディング表示必須。
@@ -21,4 +23,6 @@ export const llmApi = {
     api.post<ProblemDraftResponse>("/llm/problem-draft", body),
   sheetDraft: (body: SheetDraftRequest) =>
     api.post<SheetDraftResponse>("/llm/sheet-draft", body),
+  trendProblemDraft: (body: TrendProblemDraftRequest) =>
+    api.post<TrendProblemDraftResponse>("/llm/trend-problem-draft", body),
 };

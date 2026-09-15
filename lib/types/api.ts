@@ -485,6 +485,35 @@ export interface ProblemDraftResponse {
   drafts: ProblemDraftItemOut[];
 }
 
+// ---- 出題傾向ベースの作問 ----
+
+export interface TrendProblemDraftTarget {
+  test_id: number;
+  unit_id: number;
+}
+
+export interface TrendProblemDraftRequest {
+  user_id: number;
+  targets: TrendProblemDraftTarget[];
+}
+
+export interface TrendProblemDraftItemOut {
+  test_id: number;
+  unit_id: number;
+  format_id: number;
+  difficulty: Difficulty;
+  body: string;
+  answer: string;
+  explanation: string;
+  hints: ProblemDraftHintOut[];
+  prerequisite_unit_ids: number[];
+}
+
+export interface TrendProblemDraftResponse {
+  job_id: number;
+  drafts: TrendProblemDraftItemOut[];
+}
+
 export interface SheetDraftRequest {
   answer_sheet_id: number;
   user_id: number;
