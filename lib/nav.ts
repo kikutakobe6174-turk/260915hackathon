@@ -11,7 +11,6 @@ export const MAIN_NAV: NavItem[] = [
   { label: "ホーム", href: "/", roles: ["operator", "teacher"] },
   { label: "マスタ管理", href: "/masters/schools", roles: ["operator"] },
   { label: "テスト一覧", href: "/tests", roles: ["operator", "teacher"] },
-  { label: "授業回一覧", href: "/lessons", roles: ["operator", "teacher"] },
   {
     label: "問題作成（過去問の傾向から）",
     href: "/problems/from-trends",

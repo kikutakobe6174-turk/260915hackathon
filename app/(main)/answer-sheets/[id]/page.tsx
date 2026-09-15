@@ -134,7 +134,7 @@ export default function AnswerSheetPage({ params }: { params: Promise<{ id: stri
       if (res.next_answer_sheet_id) {
         router.push(`/answer-sheets/${res.next_answer_sheet_id}`);
       } else {
-        router.push(`/lessons/${sheet.lesson_id}`);
+        router.push("/");
       }
     } catch (err) {
       setSaveError(err instanceof ApiRequestError ? err.message : "確定に失敗しました");
@@ -185,8 +185,8 @@ export default function AnswerSheetPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="flex flex-col gap-4">
-      <Link href={`/lessons/${sheet.lesson_id}`} className="text-sm text-slate-500 hover:text-slate-800">
-        ← 授業回へ戻る
+      <Link href="/" className="text-sm text-slate-500 hover:text-slate-800">
+        ← ホームへ戻る
       </Link>
       <div className="flex items-center justify-between">
         <div>
