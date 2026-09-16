@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -7,6 +8,21 @@ import httpx
 from pydantic import ValidationError
 
 from .schemas import GeminiProblemOutput, GeminiTrendOutput, GeneratedProblem, TrendAnalysis
+
+
+logger = logging.getLogger(__name__)
+
+
+def relaxed_validation_enabled() -> bool:
+    """デモ用の緩和モード（環境変数 DEMO_RELAXED_VALIDATION）。
+
+    ONのとき、内容面の厳しい検証（思考途中マーカー、構成・問題数の一致、
+    総配点の一致）で落ちても処理を止めず、警告ログだけ残して結果を通す。
+    JSONが壊れている、必須フィールドが欠けている、問題文・正答・解説が空、
+    という致命的な場合は ON/OFF によらず従来どおりエラーにする。
+    OFF（既定）にすれば従来の厳格検証に戻る。
+    """
+    return os.getenv("DEMO_RELAXED_VALIDATION", "false").lower() in {"1", "true", "yes", "on"}
 
 
 class LLMProviderError(Exception):
@@ -117,6 +133,19 @@ class GeminiProvider(LLMProvider):
                     detail = f"総配点は{failed.total_points}点、小問の配点合計は{failed_sum}点でした。"
                 except ValidationError:
                     detail = "必須項目の欠落または不正な値が残っています。"
+                else:
+                    if relaxed_validation_enabled():
+                        # 小問の配点はそのまま使い、総配点だけ合計へ寄せて成立させる。
+                        # 小問番号の重複などで組み直せない場合は、従来どおりエラーにする。
+                        try:
+                            reconciled = TrendAnalysis.model_validate(
+                                {"total_points": failed_sum, "items": [item.model_dump() for item in failed.items]}
+                            )
+                        except ValidationError:
+                            pass
+                        else:
+                            logger.warning("relaxed validation accepted: trend analysis (%s)", detail)
+                            return reconciled
                 raise LLMProviderError(
                     "GEMINI_SCHEMA_ERROR",
                     f"再解析後も検証条件を満たしませんでした。{detail} 配点表示が見えるPDF・画像か確認してください。",
@@ -159,7 +188,11 @@ class GeminiProvider(LLMProvider):
                 self._validate_generated_problems(repaired, specifications)
                 candidate = repaired
             except (ValidationError, ValueError) as exc:
-                raise LLMProviderError("GEMINI_SCHEMA_ERROR", "再生成後も問題文・正答・解説の検証条件を満たしませんでした。内容を変えて再試行してください。") from exc
+                if relaxed_validation_enabled() and self._minimally_valid_problems(repaired) is not None:
+                    logger.warning("relaxed validation accepted: problem generation (%s)", exc)
+                    candidate = repaired
+                else:
+                    raise LLMProviderError("GEMINI_SCHEMA_ERROR", "再生成後も問題文・正答・解説の検証条件を満たしませんでした。内容を変えて再試行してください。") from exc
 
         review_prompt = (
             "次の問題セットを数学の校閲者として全問独立に解き直してください。問題文の条件、正答、解説の計算が"
@@ -173,7 +206,29 @@ class GeminiProvider(LLMProvider):
         try:
             return self._validate_generated_problems(reviewed, specifications)
         except (ValidationError, ValueError) as exc:
+            if relaxed_validation_enabled():
+                # 校閲後の出力を優先し、それが構造的に壊れていれば校閲前の完成稿へ戻す。
+                fallback = self._minimally_valid_problems(reviewed) or self._minimally_valid_problems(candidate)
+                if fallback is not None:
+                    logger.warning("relaxed validation accepted: math review (%s)", exc)
+                    return fallback
             raise LLMProviderError("GEMINI_SCHEMA_ERROR", "数学校閲後も問題文・正答・解説の検証条件を満たしませんでした。再試行してください。") from exc
+
+    @staticmethod
+    def _minimally_valid_problems(raw: dict) -> list[GeneratedProblem] | None:
+        """デモ緩和モード用の最低限の検証。
+
+        JSONとして GeminiProblemOutput の形をしていること、必須フィールドが揃っていること、
+        問題文・正答・解説が空でないこと（空文字は GeneratedProblem 側で弾かれる）だけを確認し、
+        満たさなければ None を返して呼び出し側に従来のエラーを投げさせる。
+        思考途中マーカーや構成・問題数の一致はここでは見ない。
+        """
+        try:
+            validated = GeminiProblemOutput.model_validate(raw)
+            problems = [GeneratedProblem.model_validate(problem.model_dump()) for problem in validated.problems]
+        except ValidationError:
+            return None
+        return problems or None
 
     @staticmethod
     def _validate_generated_problems(raw: dict, specifications: list[dict]) -> list[GeneratedProblem]:

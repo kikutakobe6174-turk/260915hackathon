@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from urllib.parse import quote
@@ -14,7 +15,7 @@ from fastapi.responses import JSONResponse, Response
 
 from .database import connect, init_db
 from .document_generator import build_test_docx
-from .providers import LLMProvider, LLMProviderError, get_provider
+from .providers import LLMProvider, LLMProviderError, get_provider, relaxed_validation_enabled
 from .pdf_generator import build_test_pdf
 from .schemas import (
     GeneratedProblem,
@@ -37,6 +38,8 @@ from .schemas import (
 )
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> str:
@@ -128,7 +131,8 @@ def trend_job_response(conn, job_id: int):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    # relaxed_validation はデモ用の緩和モードが有効かどうか。運用中に状態を確認できるようにする。
+    return {"status": "ok", "relaxed_validation": relaxed_validation_enabled()}
 
 
 @app.post("/auth/login")
@@ -278,7 +282,10 @@ async def generate_from_analysis(job_id: int, body: JobAction, provider: LLMProv
     expected = Counter((r["unit_id"], r["format_id"], r["difficulty"]) for r in rows for _ in range(r["count"]))
     actual = Counter((p.unit_id, p.format_id, p.difficulty) for p in generated)
     if actual != expected:
-        error(422, "GENERATION_COUNT_MISMATCH", "生成問題の構成または問題数が元テストと一致しないため、下書きを保存しませんでした。")
+        # デモ緩和モードでは、構成が元テストとずれても止めずに下書きを残す（配点は等分へフォールバックする）。
+        if not relaxed_validation_enabled():
+            error(422, "GENERATION_COUNT_MISMATCH", "生成問題の構成または問題数が元テストと一致しないため、下書きを保存しませんでした。")
+        logger.warning("relaxed validation accepted: generated composition differs from the source test (expected=%s actual=%s)", dict(expected), dict(actual))
     with connect() as conn:
         cursor = conn.execute("INSERT INTO llm_jobs(kind,parent_job_id,test_id,user_id,status,provider,model) VALUES('problem_generation',?,?,?,'draft',?,?)", (job_id, job["test_id"], body.user_id, provider.name, getattr(provider, "model", "test")))
         generation_job_id = cursor.lastrowid
