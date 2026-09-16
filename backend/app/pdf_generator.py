@@ -81,9 +81,24 @@ class PageCountCanvas(pdfcanvas.Canvas):
         super().save()
 
 
+def resolve_points(total_points: int, problems: list[dict], problem_points: list[int] | None, group_size: int):
+    """Gemini解析の実配点があればそれを使い、無ければ従来どおり大問へ等分する。
+
+    戻り値は (満点, 大問ごとの配点, 小問ごとの配点 or None)。
+    """
+    groups = [problems[index:index + group_size] for index in range(0, len(problems), group_size)]
+    if problem_points and len(problem_points) == len(problems):
+        major_points = [sum(problem_points[index:index + group_size]) for index in range(0, len(problem_points), group_size)]
+        return sum(problem_points), major_points, list(problem_points)
+    return total_points, _distribute(total_points, len(groups)), None
+
+
 def build_test_pdf(*, school_name: str, grade: str, subject: str, title: str,
-                   duration_minutes: int, total_points: int, problems: list[dict]) -> bytes:
+                   duration_minutes: int, total_points: int, problems: list[dict],
+                   problem_points: list[int] | None = None) -> bytes:
     regular, bold = _register_fonts()
+    group_size = 4
+    total_points, major_points, per_problem_points = resolve_points(total_points, problems, problem_points, group_size)
     output = io.BytesIO()
     page_width, page_height = A4
     doc = BaseDocTemplate(
@@ -128,9 +143,7 @@ def build_test_pdf(*, school_name: str, grade: str, subject: str, title: str,
     ]))
     story.extend([metadata, HRFlowable(width="100%", thickness=0.8, color=colors.black, spaceBefore=2 * mm, spaceAfter=5 * mm)])
 
-    group_size = 4
     groups = [problems[index:index + group_size] for index in range(0, len(problems), group_size)]
-    major_points = _distribute(total_points, len(groups))
     for major_index, group in enumerate(groups, 1):
         if major_index > 1:
             story.append(PageBreak())
@@ -138,6 +151,8 @@ def build_test_pdf(*, school_name: str, grade: str, subject: str, title: str,
         problem_flowables = []
         for sub_index, problem in enumerate(group, 1):
             body = _readable_math(problem["body"].strip())
+            if per_problem_points is not None:
+                body += _escape(f"　（{per_problem_points[(major_index - 1) * group_size + sub_index - 1]}点）")
             problem_flowables.extend([
                 Paragraph(f"({sub_index})　{body}", problem_style),
                 Spacer(1, 17 * mm),

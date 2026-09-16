@@ -50,6 +50,9 @@ def init_db():
         columns = {row[1] for row in conn.execute("PRAGMA table_info(problems)")}
         if "analysis_job_id" not in columns:
             conn.execute("ALTER TABLE problems ADD COLUMN analysis_job_id INTEGER")
+        # 元テストの小問配点。問題バンク保存時に確定させ、以降の再解析に左右されないようにする。
+        if "points" not in columns:
+            conn.execute("ALTER TABLE problems ADD COLUMN points INTEGER")
         trend_columns = {row[1] for row in conn.execute("PRAGMA table_info(trends)")}
         if "confidence" not in trend_columns:
             conn.execute("ALTER TABLE trends ADD COLUMN confidence REAL")

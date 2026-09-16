@@ -101,6 +101,31 @@ export default function TrendsPage({ params }: { params: Promise<{ id: string }>
     return { difficulty, byUnit: [...byUnit.entries()], byFormat: [...byFormat.entries()] };
   }, [rows]);
 
+  // 生成した各問題へ、解析で確定した小問配点を 単元×形式×難易度 ごとに順番に割り当てる。
+  // バックエンドのPDF・Word生成と同じ規則なので、プレビューと出力物の配点が一致する。
+  const draftPoints = useMemo(() => {
+    if (drafts.length === 0) return null;
+    const buckets = new Map<string, number[]>();
+    for (const row of rows) {
+      if (!row.unit_id) return null;
+      const key = `${row.unit_id}/${row.format_id}/${row.difficulty}`;
+      buckets.set(key, [...(buckets.get(key) ?? []), row.points]);
+    }
+    const cursors = new Map<string, number>();
+    const values: number[] = [];
+    for (const draft of drafts) {
+      const key = `${draft.unit_id}/${draft.format_id}/${draft.difficulty}`;
+      const index = cursors.get(key) ?? 0;
+      const available = buckets.get(key);
+      if (!available || index >= available.length) return null;
+      values.push(available[index]);
+      cursors.set(key, index + 1);
+    }
+    return values;
+  }, [rows, drafts]);
+
+  const previewTotalPoints = draftPoints ? draftPoints.reduce((sum, value) => sum + value, 0) : totalPoints;
+
   function updateRow(key: string, patch: Partial<EditableRow>) {
     setRows((current) => current.map((row) => row.key === key ? { ...row, ...patch } : row)); setAnalysisConfirmed(false);
   }
@@ -208,7 +233,7 @@ export default function TrendsPage({ params }: { params: Promise<{ id: string }>
     setDownloading(format); setGenerationError(null);
     try {
       await llmApi.updateProblemBatch(generationJobId, { user_id: user.id, problems: drafts });
-      const body = { duration_minutes: 50, total_points: totalPoints || 100, title: `${test?.term ?? "定期"}テスト対策問題` };
+      const body = { duration_minutes: 50, total_points: previewTotalPoints || 100, title: `${test?.term ?? "定期"}テスト対策問題` };
       const filename = format === "pdf" ? await downloadGenerationPdf(generationJobId, body) : await downloadGenerationWord(generationJobId, body);
       setMessage(`${filename} をダウンロードしました。`);
     } catch (err) { setGenerationError(err instanceof Error ? err.message : `${format === "pdf" ? "PDF" : "Word"}の生成に失敗しました。`); }
@@ -287,10 +312,10 @@ export default function TrendsPage({ params }: { params: Promise<{ id: string }>
       <div className="mx-auto w-full max-w-[794px] bg-white px-[68px] py-[52px] text-black shadow-sm ring-1 ring-slate-200" style={{ fontFamily: '"Yu Gothic", "BIZ UDPGothic", sans-serif' }}>
         <div className="text-center text-sm">{schoolName}</div>
         <h3 className="mt-1 text-center text-xl font-semibold leading-8">{test?.grade}　{subjectName}<br/>{test?.term}テスト対策問題</h3>
-        <div className="mt-5 grid grid-cols-[1fr_auto_auto] gap-6 text-sm"><span>実施日：____年__月__日</span><span>制限時間：50分</span><span>満点：{totalPoints}点</span></div>
-        <div className="mt-4 grid grid-cols-[auto_1fr_auto] gap-5 text-sm"><span>{test?.grade.replace("高", "")}年 ____組　____番</span><span>氏名 ________________________</span><span>得点 ______ / {totalPoints}</span></div>
+        <div className="mt-5 grid grid-cols-[1fr_auto_auto] gap-6 text-sm"><span>実施日：____年__月__日</span><span>制限時間：50分</span><span>満点：{previewTotalPoints}点</span></div>
+        <div className="mt-4 grid grid-cols-[auto_1fr_auto] gap-5 text-sm"><span>{test?.grade.replace("高", "")}年 ____組　____番</span><span>氏名 ________________________</span><span>得点 ______ / {previewTotalPoints}</span></div>
         <hr className="my-6 border-black" />
-        {previewGroups.map((group, groupIndex) => <div key={groupIndex} className="mb-8 break-inside-avoid"><div className="mb-4 flex justify-between font-semibold"><span>第{groupIndex + 1}問　次の問いに答えなさい。</span><span>〔{Math.floor(totalPoints / previewGroups.length) + (groupIndex < totalPoints % previewGroups.length ? 1 : 0)}点〕</span></div>{group.map((problem, problemIndex) => <div key={`${groupIndex}-${problemIndex}`} className="mb-7"><p className="whitespace-pre-wrap text-[15px] leading-7">({problemIndex + 1})　{problem.body}</p><div className="h-16" /></div>)}</div>)}
+        {previewGroups.map((group, groupIndex) => <div key={groupIndex} className="mb-8 break-inside-avoid"><div className="mb-4 flex justify-between font-semibold"><span>第{groupIndex + 1}問　次の問いに答えなさい。</span><span>〔{draftPoints ? draftPoints.slice(groupIndex * 4, groupIndex * 4 + 4).reduce((sum, value) => sum + value, 0) : Math.floor(totalPoints / previewGroups.length) + (groupIndex < totalPoints % previewGroups.length ? 1 : 0)}点〕</span></div>{group.map((problem, problemIndex) => <div key={`${groupIndex}-${problemIndex}`} className="mb-7"><p className="whitespace-pre-wrap text-[15px] leading-7">({problemIndex + 1})　{problem.body}{draftPoints ? `　（${draftPoints[groupIndex * 4 + problemIndex]}点）` : ""}</p><div className="h-16" /></div>)}</div>)}
       </div>
       <details className="rounded-lg border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-semibold text-slate-600">問題内容を編集・問題バンクへ保存</summary><div className="mt-4 flex flex-col gap-4">
         {drafts.map((draft, index) => <Card key={`${generationJobId}-${index}`}><CardHeader><CardTitle>問題 {index + 1}</CardTitle></CardHeader><CardContent className="grid gap-3 md:grid-cols-2">

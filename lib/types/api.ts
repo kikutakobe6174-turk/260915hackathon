@@ -569,3 +569,17 @@ export interface SheetDraftResponse {
   image_discarded: boolean;
   rows: SheetDraftRowOut[];
 }
+
+// Gemini解析で確定した小問配点。画面プレビューとPDF・Wordの配点表示を一致させるために使う。
+export interface ProblemPointsItem {
+  problem_id: number;
+  points: number;
+}
+
+export interface TestProblemPointsOut {
+  test_id: number;
+  /** analysis: 解析の実配点を使う / even: 解析配点が無いので満点を大問へ等分する */
+  source: "analysis" | "even";
+  total_points: number | null;
+  items: ProblemPointsItem[];
+}

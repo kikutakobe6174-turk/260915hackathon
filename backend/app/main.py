@@ -334,12 +334,66 @@ def save_generation(job_id: int, body: SaveGenerationRequest):
     with connect() as conn:
         job = conn.execute("SELECT * FROM llm_jobs WHERE id=?", (job_id,)).fetchone()
         rows = conn.execute("SELECT * FROM generated_drafts WHERE job_id=? ORDER BY id", (job_id,)).fetchall()
+        # 元テストの小問配点をこの時点で確定させ、以降の再解析に影響されないようにする。
+        points = assign_trend_points(conn, rows, llm_job_id=job["parent_job_id"]) or [None] * len(rows)
         ids = []
-        for row in rows:
-            cursor = conn.execute("INSERT INTO problems(unit_id,format_id,difficulty,body,answer,explanation,is_return,status,source,llm_job_id,analysis_job_id,hints_json,prerequisite_unit_ids_json) VALUES(?,?,?,?,?,?,0,'draft','llm',?,?,?, '[]')", (row["unit_id"], row["format_id"], row["difficulty"], row["body"], row["answer"], row["explanation"], job_id, job["parent_job_id"], row["hints_json"]))
+        for row, row_points in zip(rows, points):
+            cursor = conn.execute("INSERT INTO problems(unit_id,format_id,difficulty,body,answer,explanation,is_return,status,source,llm_job_id,analysis_job_id,hints_json,prerequisite_unit_ids_json,points) VALUES(?,?,?,?,?,?,0,'draft','llm',?,?,?, '[]',?)", (row["unit_id"], row["format_id"], row["difficulty"], row["body"], row["answer"], row["explanation"], job_id, job["parent_job_id"], row["hints_json"], row_points))
             ids.append(cursor.lastrowid)
         conn.execute("UPDATE llm_jobs SET status='saved',confirmed_at=? WHERE id=?", (utc_now(), job_id))
         return {"job_id": job_id, "analysis_job_id": job["parent_job_id"], "saved": len(ids), "problem_ids": ids}
+
+
+def assign_trend_points(conn, rows, *, test_id: int | None = None, llm_job_id: int | None = None) -> list[int] | None:
+    """Gemini解析で確定した trends の配点を、同じ 単元×形式×難易度 の問題へ出現順に割り当てる。
+
+    問題は trends の構成(単元×形式×難易度ごとの問題数)をそのまま複製して生成されるため、
+    この対応付けで元テストの実配点を復元できる。1問でも対応が取れない場合は None を返し、
+    呼び出し側は従来どおり満点の等分へフォールバックする。
+    """
+    if llm_job_id is not None:
+        source = ("SELECT unit_id,format_id,difficulty,points FROM trends WHERE llm_job_id=? ORDER BY id", (llm_job_id,))
+    else:
+        source = ("SELECT unit_id,format_id,difficulty,points FROM trends WHERE test_id=? ORDER BY id", (test_id,))
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+    for row in conn.execute(*source):
+        buckets.setdefault((row["unit_id"], row["format_id"], row["difficulty"]), []).append(row["points"])
+    if not buckets:
+        return None
+    cursors: dict[tuple[int, int, int], int] = {}
+    points = []
+    for row in rows:
+        key = (row["unit_id"], row["format_id"], row["difficulty"])
+        index = cursors.get(key, 0)
+        available = buckets.get(key, [])
+        if index >= len(available):
+            return None
+        points.append(available[index])
+        cursors[key] = index + 1
+    return points
+
+
+def test_problem_points(conn, test_id: int) -> dict[int, int]:
+    """テストに紐づく全問題(id昇順)へ実配点を割り当てた {problem_id: points}。復元できなければ空。"""
+    rows = conn.execute(
+        "SELECT id,unit_id,format_id,difficulty,points FROM problems WHERE analysis_job_id IN (SELECT id FROM llm_jobs WHERE test_id=?) ORDER BY id",
+        (test_id,),
+    ).fetchall()
+    if not rows:
+        return {}
+    # 保存時に確定させた配点があればそれを使う（その後テストを再解析しても値がぶれない）。
+    if all(row["points"] is not None for row in rows):
+        return {row["id"]: row["points"] for row in rows}
+    points = assign_trend_points(conn, rows, test_id=test_id)
+    return {row["id"]: value for row, value in zip(rows, points)} if points else {}
+
+
+def selected_problem_points(conn, test_id: int, problem_ids: list[int]) -> list[int] | None:
+    """印刷対象として選ばれた問題の配点。1問でも欠ければ None（＝等分にフォールバック）。"""
+    mapping = test_problem_points(conn, test_id)
+    if not mapping or any(problem_id not in mapping for problem_id in problem_ids):
+        return None
+    return [mapping[problem_id] for problem_id in problem_ids]
 
 
 def trend_output(conn, test_id: int):
@@ -407,6 +461,20 @@ def list_problems(unit_id: int | None = None, format_id: int | None = None, diff
 @app.get("/problems/stats")
 def problem_stats(test_id: int | None = None, round: int | None = None, level: str | None = None):
     return {"items": []}
+
+
+@app.get("/tests/{test_id}/problem-points")
+def get_problem_points(test_id: int):
+    """画面プレビューがPDF・Wordと同じ配点を表示するための対応表。"""
+    with connect() as conn:
+        get_test(conn, test_id)
+        mapping = test_problem_points(conn, test_id)
+        return {
+            "test_id": test_id,
+            "source": "analysis" if mapping else "even",
+            "total_points": sum(mapping.values()) if mapping else None,
+            "items": [{"problem_id": problem_id, "points": points} for problem_id, points in mapping.items()],
+        }
 
 
 @app.get("/tests/{test_id}/coverage")
@@ -615,6 +683,7 @@ def export_test_pdf(test_id: int, body: PdfExportRequest):
         pdf = build_test_pdf(
             school_name=school["name"], grade=test["grade"], subject=subject, title=title,
             duration_minutes=body.duration_minutes, total_points=body.total_points, problems=problems,
+            problem_points=selected_problem_points(conn, test_id, body.problem_ids),
         )
         safe_subject = re.sub(r'[\\/:*?"<>|\s]+', '', subject)
         safe_term = re.sub(r'[\\/:*?"<>|\s]+', '', test["term"])
@@ -656,6 +725,7 @@ def export_test_word(test_id: int, body: PdfExportRequest):
         content = build_test_docx(
             school_name=school_name, grade=test["grade"], subject=subject, title=title,
             duration_minutes=body.duration_minutes, total_points=body.total_points, problems=problems,
+            problem_points=selected_problem_points(conn, test_id, body.problem_ids),
         )
         filename = document_filename(test, subject, "docx")
         return Response(content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=attachment_headers(filename))
@@ -669,17 +739,18 @@ def generation_export_context(conn, generation_job_id: int):
     if not problems:
         error(422, "EMPTY_GENERATION", "生成問題がないためファイルを作成できません。")
     test, school_name, subject = test_document_context(conn, job["test_id"])
-    return test, school_name, subject, problems
+    return test, school_name, subject, problems, assign_trend_points(conn, problems, llm_job_id=job["parent_job_id"])
 
 
 @app.post("/llm/problem-batches/{generation_job_id}/pdf")
 def export_generation_pdf(generation_job_id: int, body: GenerationExportRequest):
     with connect() as conn:
-        test, school_name, subject, problems = generation_export_context(conn, generation_job_id)
+        test, school_name, subject, problems, problem_points = generation_export_context(conn, generation_job_id)
         title = (body.title or f"{test['term']}テスト対策問題").strip()
         content = build_test_pdf(
             school_name=school_name, grade=test["grade"], subject=subject, title=title,
             duration_minutes=body.duration_minutes, total_points=body.total_points, problems=problems,
+            problem_points=problem_points,
         )
         filename = document_filename(test, subject, "pdf")
         return Response(content, media_type="application/pdf", headers=attachment_headers(filename))
@@ -688,11 +759,12 @@ def export_generation_pdf(generation_job_id: int, body: GenerationExportRequest)
 @app.post("/llm/problem-batches/{generation_job_id}/word")
 def export_generation_word(generation_job_id: int, body: GenerationExportRequest):
     with connect() as conn:
-        test, school_name, subject, problems = generation_export_context(conn, generation_job_id)
+        test, school_name, subject, problems, problem_points = generation_export_context(conn, generation_job_id)
         title = (body.title or f"{test['term']}テスト対策問題").strip()
         content = build_test_docx(
             school_name=school_name, grade=test["grade"], subject=subject, title=title,
             duration_minutes=body.duration_minutes, total_points=body.total_points, problems=problems,
+            problem_points=problem_points,
         )
         filename = document_filename(test, subject, "docx")
         return Response(content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=attachment_headers(filename))

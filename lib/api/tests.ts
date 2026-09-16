@@ -7,6 +7,7 @@ import type {
   PutUnitPrerequisitesRequest,
   PrerequisiteOut,
   TestPrerequisitesOut,
+  TestProblemPointsOut,
   TestTrendsOut,
 } from "@/lib/types/api";
 
@@ -15,6 +16,8 @@ export const testsApi = {
     api.get<Test[]>("/tests", query),
   create: (body: CreateTestRequest) => api.post<Test>("/tests", body),
   get: (id: number) => api.get<Test>(`/tests/${id}`),
+  problemPoints: (id: number) =>
+    api.get<TestProblemPointsOut>(`/tests/${id}/problem-points`),
 };
 
 export const trendsApi = {

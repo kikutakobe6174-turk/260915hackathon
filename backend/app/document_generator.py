@@ -9,6 +9,8 @@ from docx.oxml.ns import qn
 from docx.shared import Mm, Pt
 
 from .math_text import normalize_math_text
+# 配点計算はPDFと同じロジックを共有し、PDF・Word・画面プレビューの表示を一致させる。
+from .pdf_generator import resolve_points
 
 
 FONT_NAME = "BIZ UDPGothic"
@@ -101,13 +103,11 @@ def _add_math_runs(paragraph, text: str):
         _set_run_font(run)
 
 
-def _distribute(total: int, count: int) -> list[int]:
-    quotient, remainder = divmod(total, count)
-    return [quotient + (1 if index < remainder else 0) for index in range(count)]
-
-
 def build_test_docx(*, school_name: str, grade: str, subject: str, title: str,
-                    duration_minutes: int, total_points: int, problems: list[dict]) -> bytes:
+                    duration_minutes: int, total_points: int, problems: list[dict],
+                    problem_points: list[int] | None = None) -> bytes:
+    group_size = 4
+    total_points, major_points, per_problem_points = resolve_points(total_points, problems, problem_points, group_size)
     document = Document()
     section = document.sections[0]
     section.page_width = Mm(210)
@@ -154,15 +154,14 @@ def build_test_docx(*, school_name: str, grade: str, subject: str, title: str,
     rule.paragraph_format.space_after = Pt(9)
     _add_bottom_rule(rule)
 
-    groups = [problems[index:index + 4] for index in range(0, len(problems), 4)]
-    points = _distribute(total_points, len(groups))
+    groups = [problems[index:index + group_size] for index in range(0, len(problems), group_size)]
     for major_index, group in enumerate(groups, 1):
         major = document.add_paragraph()
         major.paragraph_format.page_break_before = major_index > 1
         major.paragraph_format.keep_with_next = True
         major.paragraph_format.space_before = Pt(4)
         major.paragraph_format.space_after = Pt(5)
-        _set_run_font(major.add_run(f"第{major_index}問　次の問いに答えなさい。　　　　　　　　　〔{points[major_index - 1]}点〕"), size=11, bold=True)
+        _set_run_font(major.add_run(f"第{major_index}問　次の問いに答えなさい。　　　　　　　　　〔{major_points[major_index - 1]}点〕"), size=11, bold=True)
         for sub_index, problem in enumerate(group, 1):
             paragraph = document.add_paragraph()
             paragraph.paragraph_format.keep_together = True
@@ -172,6 +171,9 @@ def build_test_docx(*, school_name: str, grade: str, subject: str, title: str,
             prefix = paragraph.add_run(f"({sub_index})　")
             _set_run_font(prefix)
             _add_math_runs(paragraph, problem["body"].strip())
+            if per_problem_points is not None:
+                suffix = paragraph.add_run(f"　（{per_problem_points[(major_index - 1) * group_size + sub_index - 1]}点）")
+                _set_run_font(suffix)
 
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
