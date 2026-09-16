@@ -150,3 +150,49 @@ def test_saved_points_survive_reanalysis(tmp_path, monkeypatch):
             assert after["items"] == before["items"]
     finally:
         app.dependency_overrides.clear()
+
+
+def test_mixed_points_returns_partial_map(tmp_path, monkeypatch):
+    """points列の追加前に保存された問題が混ざっていても、確定済みの配点は使い続ける。"""
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "mixed.db"))
+    import sqlite3
+
+    import app.main as main
+
+    app.dependency_overrides[main.get_provider] = lambda: FakeProvider()
+    try:
+        with TestClient(app) as client:
+            generation_job_id, drafts = _generate_and_save(client)
+            saved = client.post(f"/llm/problem-batches/{generation_job_id}/save", json={"user_id": 1, "problems": drafts})
+            assert saved.status_code == 200, saved.text
+            problem_ids = saved.json()["problem_ids"]
+
+            # 1問だけ、旧データ相当（配点未確定）へ戻す
+            legacy_id = problem_ids[0]
+            connection = sqlite3.connect(tmp_path / "mixed.db")
+            connection.execute("UPDATE problems SET points=NULL WHERE id=?", (legacy_id,))
+            connection.commit()
+            connection.close()
+
+            points = client.get("/tests/1/problem-points").json()
+            assert points["source"] == "analysis"
+            assert {item["problem_id"] for item in points["items"]} == set(problem_ids[1:])
+            assert legacy_id not in {item["problem_id"] for item in points["items"]}
+
+            # 配点が欠けた問題を含めて出力すると、従来どおり満点の等分になる
+            mixed = client.post("/tests/1/pdf", json={
+                "problem_ids": problem_ids, "duration_minutes": 50, "total_points": 100,
+            })
+            assert mixed.status_code == 200, mixed.text
+            mixed_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(mixed.content)).pages)
+            assert "満点：100点" in mixed_text
+
+            # 配点が揃っている問題だけを選べば、実配点で出力される
+            only_known = client.post("/tests/1/pdf", json={
+                "problem_ids": problem_ids[1:], "duration_minutes": 50, "total_points": 100,
+            })
+            assert only_known.status_code == 200, only_known.text
+            known_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(only_known.content)).pages)
+            assert "満点：15点" in known_text
+    finally:
+        app.dependency_overrides.clear()

@@ -382,8 +382,12 @@ def test_problem_points(conn, test_id: int) -> dict[int, int]:
     if not rows:
         return {}
     # 保存時に確定させた配点があればそれを使う（その後テストを再解析しても値がぶれない）。
-    if all(row["points"] is not None for row in rows):
-        return {row["id"]: row["points"] for row in rows}
+    # 1問でも確定値があれば、それだけを信頼して部分的な対応表を返す。配点が欠けた問題が
+    # 選ばれた場合は selected_problem_points 側が従来の等分へフォールバックする。
+    stored = {row["id"]: row["points"] for row in rows if row["points"] is not None}
+    if stored:
+        return stored
+    # points 列を追加する前に保存された問題だけのテストは、trends からの復元を試みる。
     points = assign_trend_points(conn, rows, test_id=test_id)
     return {row["id"]: value for row, value in zip(rows, points)} if points else {}
 
