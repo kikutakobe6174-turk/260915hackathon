@@ -684,13 +684,10 @@ def export_test_pdf(test_id: int, body: PdfExportRequest):
             school_name=school["name"], grade=test["grade"], subject=subject, title=title,
             duration_minutes=body.duration_minutes, total_points=body.total_points, problems=problems,
             problem_points=selected_problem_points(conn, test_id, body.problem_ids),
+            include_answers=body.include_answers,
         )
-        safe_subject = re.sub(r'[\\/:*?"<>|\s]+', '', subject)
-        safe_term = re.sub(r'[\\/:*?"<>|\s]+', '', test["term"])
-        filename = f"{test['year']}_{test['grade']}_{safe_subject}_{safe_term}_対策問題.pdf"
-        encoded_filename = quote(filename)
-        headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}", "X-Filename": encoded_filename}
-        return Response(pdf, media_type="application/pdf", headers=headers)
+        filename = document_filename(test, subject, "pdf", body.include_answers)
+        return Response(pdf, media_type="application/pdf", headers=attachment_headers(filename))
 
 
 def test_document_context(conn, test_id: int):
@@ -701,10 +698,11 @@ def test_document_context(conn, test_id: int):
     return test, school["name"], subject
 
 
-def document_filename(test, subject: str, extension: str):
+def document_filename(test, subject: str, extension: str, include_answers: bool = False):
     safe_subject = re.sub(r'[\\/:*?"<>|\s]+', '', subject)
     safe_term = re.sub(r'[\\/:*?"<>|\s]+', '', test["term"])
-    return f"{test['year']}_{test['grade']}_{safe_subject}_{safe_term}_対策問題.{extension}"
+    suffix = "_解答解説" if include_answers else ""
+    return f"{test['year']}_{test['grade']}_{safe_subject}_{safe_term}_対策問題{suffix}.{extension}"
 
 
 def attachment_headers(filename: str):
@@ -726,8 +724,9 @@ def export_test_word(test_id: int, body: PdfExportRequest):
             school_name=school_name, grade=test["grade"], subject=subject, title=title,
             duration_minutes=body.duration_minutes, total_points=body.total_points, problems=problems,
             problem_points=selected_problem_points(conn, test_id, body.problem_ids),
+            include_answers=body.include_answers,
         )
-        filename = document_filename(test, subject, "docx")
+        filename = document_filename(test, subject, "docx", body.include_answers)
         return Response(content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=attachment_headers(filename))
 
 
@@ -750,9 +749,9 @@ def export_generation_pdf(generation_job_id: int, body: GenerationExportRequest)
         content = build_test_pdf(
             school_name=school_name, grade=test["grade"], subject=subject, title=title,
             duration_minutes=body.duration_minutes, total_points=body.total_points, problems=problems,
-            problem_points=problem_points,
+            problem_points=problem_points, include_answers=body.include_answers,
         )
-        filename = document_filename(test, subject, "pdf")
+        filename = document_filename(test, subject, "pdf", body.include_answers)
         return Response(content, media_type="application/pdf", headers=attachment_headers(filename))
 
 
@@ -764,7 +763,7 @@ def export_generation_word(generation_job_id: int, body: GenerationExportRequest
         content = build_test_docx(
             school_name=school_name, grade=test["grade"], subject=subject, title=title,
             duration_minutes=body.duration_minutes, total_points=body.total_points, problems=problems,
-            problem_points=problem_points,
+            problem_points=problem_points, include_answers=body.include_answers,
         )
-        filename = document_filename(test, subject, "docx")
+        filename = document_filename(test, subject, "docx", body.include_answers)
         return Response(content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=attachment_headers(filename))

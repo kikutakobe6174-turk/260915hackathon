@@ -454,12 +454,16 @@ export interface PdfExportRequest {
   duration_minutes: number;
   total_points: number;
   title?: string;
+  /** true で、正答・解説・3段階ヒントを載せた解答解説版を出力する。 */
+  include_answers?: boolean;
 }
 
 export interface GenerationExportRequest {
   duration_minutes: number;
   total_points: number;
   title?: string;
+  /** true で、正答・解説・3段階ヒントを載せた解答解説版を出力する。 */
+  include_answers?: boolean;
 }
 
 export interface TrendDraftUpdateRequest {

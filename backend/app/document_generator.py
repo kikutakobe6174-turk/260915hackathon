@@ -1,4 +1,5 @@
 import io
+import json
 import re
 
 from docx import Document
@@ -103,10 +104,40 @@ def _add_math_runs(paragraph, text: str):
         _set_run_font(run)
 
 
+def _add_answer_block(document, problem: dict):
+    """正答・解説・3段階ヒントを解答解説版へ書き出す。DBに保存済みの値だけを使う。"""
+    def labelled(label: str, text: str, *, indent: Mm, size: float, bold_label: bool):
+        paragraph = document.add_paragraph()
+        paragraph.paragraph_format.left_indent = indent
+        paragraph.paragraph_format.space_after = Pt(1)
+        paragraph.paragraph_format.keep_together = True
+        _set_run_font(paragraph.add_run(f"{label}　"), size=size, bold=bold_label)
+        _add_math_runs(paragraph, text)
+        for run in paragraph.runs[1:]:
+            run.font.size = Pt(size)
+
+    answer = str(problem.get("answer") or "").strip()
+    if answer:
+        labelled("正答", answer, indent=Mm(8), size=10, bold_label=True)
+    explanation = str(problem.get("explanation") or "").strip()
+    if explanation:
+        labelled("解説", explanation, indent=Mm(8), size=10, bold_label=True)
+    hints = problem.get("hints")
+    if hints is None and problem.get("hints_json"):
+        hints = json.loads(problem["hints_json"])
+    for step, hint in enumerate(hints or [], 1):
+        text = hint["body"] if isinstance(hint, dict) else hint
+        if str(text).strip():
+            labelled(f"ヒント{step}", str(text).strip(), indent=Mm(12), size=9, bold_label=False)
+    spacer = document.add_paragraph()
+    spacer.paragraph_format.space_after = Pt(8)
+
+
 def build_test_docx(*, school_name: str, grade: str, subject: str, title: str,
                     duration_minutes: int, total_points: int, problems: list[dict],
-                    problem_points: list[int] | None = None) -> bytes:
+                    problem_points: list[int] | None = None, include_answers: bool = False) -> bytes:
     group_size = 4
+    display_title = f"{title}　解答・解説" if include_answers else title
     total_points, major_points, per_problem_points = resolve_points(total_points, problems, problem_points, group_size)
     document = Document()
     section = document.sections[0]
@@ -130,16 +161,16 @@ def build_test_docx(*, school_name: str, grade: str, subject: str, title: str,
     heading = document.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     heading.paragraph_format.space_after = Pt(8)
-    _set_run_font(heading.add_run(f"{grade}　{subject}\n{title}"), size=15, bold=True)
+    _set_run_font(heading.add_run(f"{grade}　{subject}\n{display_title}"), size=15, bold=True)
 
-    info = document.add_table(rows=2, cols=3)
+    values = [["実施日：____年__月__日", f"制限時間：{duration_minutes}分", f"満点：{total_points}点"]]
+    if not include_answers:
+        # 解答・解説版は配布用ではないため、氏名欄・得点欄は入れない。
+        values.append([f"{grade.replace('高', '')}年 ____組　____番", "氏名 ________________________________", f"得点 ______ / {total_points}"])
+    info = document.add_table(rows=len(values), cols=3)
     info.alignment = WD_TABLE_ALIGNMENT.CENTER
     info.autofit = False
     widths = [Mm(52), Mm(80), Mm(42)]
-    values = [
-        ["実施日：____年__月__日", f"制限時間：{duration_minutes}分", f"満点：{total_points}点"],
-        [f"{grade.replace('高', '')}年 ____組　____番", "氏名 ________________________________", f"得点 ______ / {total_points}"],
-    ]
     for row_index, row in enumerate(info.rows):
         for column_index, cell in enumerate(row.cells):
             cell.width = widths[column_index]
@@ -157,23 +188,26 @@ def build_test_docx(*, school_name: str, grade: str, subject: str, title: str,
     groups = [problems[index:index + group_size] for index in range(0, len(problems), group_size)]
     for major_index, group in enumerate(groups, 1):
         major = document.add_paragraph()
-        major.paragraph_format.page_break_before = major_index > 1
+        major.paragraph_format.page_break_before = major_index > 1 and not include_answers
         major.paragraph_format.keep_with_next = True
         major.paragraph_format.space_before = Pt(4)
         major.paragraph_format.space_after = Pt(5)
-        _set_run_font(major.add_run(f"第{major_index}問　次の問いに答えなさい。　　　　　　　　　〔{major_points[major_index - 1]}点〕"), size=11, bold=True)
+        heading_text = f"第{major_index}問" if include_answers else f"第{major_index}問　次の問いに答えなさい。　　　　　　　　　"
+        _set_run_font(major.add_run(f"{heading_text}〔{major_points[major_index - 1]}点〕"), size=11, bold=True)
         for sub_index, problem in enumerate(group, 1):
             paragraph = document.add_paragraph()
             paragraph.paragraph_format.keep_together = True
-            paragraph.paragraph_format.keep_with_next = False
+            paragraph.paragraph_format.keep_with_next = include_answers
             paragraph.paragraph_format.line_spacing = 1.25
-            paragraph.paragraph_format.space_after = Pt(42)
+            paragraph.paragraph_format.space_after = Pt(4 if include_answers else 42)
             prefix = paragraph.add_run(f"({sub_index})　")
             _set_run_font(prefix)
             _add_math_runs(paragraph, problem["body"].strip())
             if per_problem_points is not None:
                 suffix = paragraph.add_run(f"　（{per_problem_points[(major_index - 1) * group_size + sub_index - 1]}点）")
                 _set_run_font(suffix)
+            if include_answers:
+                _add_answer_block(document, problem)
 
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER

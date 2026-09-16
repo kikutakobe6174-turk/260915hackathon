@@ -210,9 +210,13 @@ class PdfExportRequest(BaseModel):
     duration_minutes: int = Field(default=50, ge=1, le=300)
     total_points: int = Field(default=100, ge=1, le=1000)
     title: str | None = Field(default=None, max_length=80)
+    # True で、正答・解説・3段階ヒントを載せた解答解説版を出力する。
+    include_answers: bool = False
 
 
 class GenerationExportRequest(BaseModel):
     duration_minutes: int = Field(default=50, ge=1, le=300)
     total_points: int = Field(default=100, ge=1, le=1000)
     title: str | None = Field(default=None, max_length=80)
+    # True で、正答・解説・3段階ヒントを載せた解答解説版を出力する。
+    include_answers: bool = False

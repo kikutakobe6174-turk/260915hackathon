@@ -1,4 +1,5 @@
 import io
+import json
 import re
 from pathlib import Path
 
@@ -93,12 +94,29 @@ def resolve_points(total_points: int, problems: list[dict], problem_points: list
     return total_points, _distribute(total_points, len(groups)), None
 
 
+def _answer_flowables(problem: dict, answer_style, hint_style) -> list:
+    """正答・解説・3段階ヒントを解答解説版の本文へ並べる。DBに保存済みの値だけを使う。"""
+    flowables = [Paragraph(f"<b>正答</b>　{_readable_math(str(problem.get('answer') or '').strip())}", answer_style)]
+    explanation = str(problem.get("explanation") or "").strip()
+    if explanation:
+        flowables.append(Paragraph(f"<b>解説</b>　{_readable_math(explanation)}", answer_style))
+    hints = problem.get("hints")
+    if hints is None and problem.get("hints_json"):
+        hints = json.loads(problem["hints_json"])
+    for step, hint in enumerate(hints or [], 1):
+        text = hint["body"] if isinstance(hint, dict) else hint
+        if str(text).strip():
+            flowables.append(Paragraph(f"ヒント{step}　{_readable_math(str(text).strip())}", hint_style))
+    return flowables
+
+
 def build_test_pdf(*, school_name: str, grade: str, subject: str, title: str,
                    duration_minutes: int, total_points: int, problems: list[dict],
-                   problem_points: list[int] | None = None) -> bytes:
+                   problem_points: list[int] | None = None, include_answers: bool = False) -> bytes:
     regular, bold = _register_fonts()
     group_size = 4
     total_points, major_points, per_problem_points = resolve_points(total_points, problems, problem_points, group_size)
+    display_title = f"{title}　解答・解説" if include_answers else title
     output = io.BytesIO()
     page_width, page_height = A4
     doc = BaseDocTemplate(
@@ -108,7 +126,7 @@ def build_test_pdf(*, school_name: str, grade: str, subject: str, title: str,
         rightMargin=18 * mm,
         topMargin=14 * mm,
         bottomMargin=16 * mm,
-        title=title,
+        title=display_title,
         author=school_name,
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="body")
@@ -120,18 +138,22 @@ def build_test_pdf(*, school_name: str, grade: str, subject: str, title: str,
     info_style = ParagraphStyle("info", parent=styles["Normal"], fontName=regular, fontSize=9.5, leading=14)
     major_style = ParagraphStyle("major", parent=styles["Normal"], fontName=bold, fontSize=11, leading=17, spaceAfter=3 * mm)
     problem_style = ParagraphStyle("problem", parent=styles["Normal"], fontName=regular, fontSize=10.5, leading=18, alignment=TA_LEFT)
+    answer_style = ParagraphStyle("answer", parent=styles["Normal"], fontName=regular, fontSize=10, leading=16, alignment=TA_LEFT, leftIndent=8 * mm, spaceBefore=1 * mm)
+    hint_style = ParagraphStyle("hint", parent=styles["Normal"], fontName=regular, fontSize=9, leading=14, alignment=TA_LEFT, leftIndent=12 * mm, textColor=colors.HexColor("#334155"))
 
     story = [
         Paragraph(_escape(school_name), school_style),
-        Paragraph(f"{_escape(grade)}　{_escape(subject)}<br/>{_escape(title)}", title_style),
+        Paragraph(f"{_escape(grade)}　{_escape(subject)}<br/>{_escape(display_title)}", title_style),
     ]
-    metadata = Table(
-        [
-            [Paragraph("実施日：____年__月__日", info_style), Paragraph(f"制限時間：{duration_minutes}分", info_style), Paragraph(f"満点：{total_points}点", info_style)],
-            [Paragraph(f"{grade.replace('高', '')}年 ____組　____番", info_style), Paragraph("氏名 ________________________________", info_style), Paragraph(f"得点 ______ / {total_points}", info_style)],
-        ],
-        colWidths=[doc.width * 0.30, doc.width * 0.46, doc.width * 0.24],
-    )
+    metadata_rows = [
+        [Paragraph("実施日：____年__月__日", info_style), Paragraph(f"制限時間：{duration_minutes}分", info_style), Paragraph(f"満点：{total_points}点", info_style)],
+    ]
+    if not include_answers:
+        # 解答・解説版は配布用ではないため、氏名欄・得点欄は入れない。
+        metadata_rows.append(
+            [Paragraph(f"{grade.replace('高', '')}年 ____組　____番", info_style), Paragraph("氏名 ________________________________", info_style), Paragraph(f"得点 ______ / {total_points}", info_style)]
+        )
+    metadata = Table(metadata_rows, colWidths=[doc.width * 0.30, doc.width * 0.46, doc.width * 0.24])
     metadata.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), regular),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -145,18 +167,21 @@ def build_test_pdf(*, school_name: str, grade: str, subject: str, title: str,
 
     groups = [problems[index:index + group_size] for index in range(0, len(problems), group_size)]
     for major_index, group in enumerate(groups, 1):
-        if major_index > 1:
+        if major_index > 1 and not include_answers:
             story.append(PageBreak())
-        major = Paragraph(_escape(f"第{major_index}問　次の問いに答えなさい。　　　　　　　　　〔{major_points[major_index - 1]}点〕"), major_style)
+        heading = f"第{major_index}問" if include_answers else f"第{major_index}問　次の問いに答えなさい。　　　　　　　　　"
+        major = Paragraph(_escape(f"{heading}〔{major_points[major_index - 1]}点〕"), major_style)
         problem_flowables = []
         for sub_index, problem in enumerate(group, 1):
             body = _readable_math(problem["body"].strip())
             if per_problem_points is not None:
                 body += _escape(f"　（{per_problem_points[(major_index - 1) * group_size + sub_index - 1]}点）")
-            problem_flowables.extend([
-                Paragraph(f"({sub_index})　{body}", problem_style),
-                Spacer(1, 17 * mm),
-            ])
+            problem_flowables.append(Paragraph(f"({sub_index})　{body}", problem_style))
+            if include_answers:
+                problem_flowables.extend(_answer_flowables(problem, answer_style, hint_style))
+                problem_flowables.append(Spacer(1, 4 * mm))
+            else:
+                problem_flowables.append(Spacer(1, 17 * mm))
         story.append(KeepTogether([major, *problem_flowables]))
         story.append(Spacer(1, 2 * mm))
 

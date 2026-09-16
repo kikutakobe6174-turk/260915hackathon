@@ -30,7 +30,7 @@ export default function PrintPreviewPage({ params }: { params: Promise<{ id: str
   const [selected, setSelected] = useState<number[] | null>(null);
   const [duration, setDuration] = useState(50);
   const [totalPoints, setTotalPoints] = useState(100);
-  const [downloading, setDownloading] = useState<"pdf" | "word" | null>(null);
+  const [downloading, setDownloading] = useState<"pdf" | "word" | "answer-pdf" | "answer-word" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const selectedIds = useMemo(
@@ -69,16 +69,16 @@ export default function PrintPreviewPage({ params }: { params: Promise<{ id: str
     });
   }
 
-  async function handleDownload(format: "pdf" | "word") {
+  async function handleDownload(format: "pdf" | "word", includeAnswers = false) {
     if (selectedIds.length === 0) return;
-    setDownloading(format);
+    setDownloading(includeAnswers ? (`answer-${format}` as const) : format);
     setMessage(null);
     try {
-      const request = { problem_ids: selectedIds, duration_minutes: duration, total_points: effectiveTotal, title };
+      const request = { problem_ids: selectedIds, duration_minutes: duration, total_points: effectiveTotal, title, include_answers: includeAnswers };
       const filename = format === "pdf" ? await downloadTestPdf(testId, request) : await downloadTestWord(testId, request);
       setMessage(`${filename} をダウンロードしました。`);
     } catch (error) {
-      setMessage(error instanceof ApiRequestError ? error.message : "PDFの生成に失敗しました。");
+      setMessage(error instanceof ApiRequestError ? error.message : `${includeAnswers ? "解答解説の" : ""}${format === "pdf" ? "PDF" : "Word"}の生成に失敗しました。`);
     } finally {
       setDownloading(null);
     }
@@ -95,9 +95,15 @@ export default function PrintPreviewPage({ params }: { params: Promise<{ id: str
           <h2 className="mt-2 text-xl font-semibold text-slate-950">印刷プレビュー</h2>
           <p className="mt-1 text-sm text-slate-600">左で問題を選び、学校配布用のPDFをそのまま保存できます。</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-2">
           <Button size="lg" onClick={() => handleDownload("pdf")} disabled={downloading !== null || selectedIds.length === 0}><Download className="h-5 w-5" />{downloading === "pdf" ? "生成中…" : "PDFで保存"}</Button>
           <Button size="lg" variant="outline" onClick={() => handleDownload("word")} disabled={downloading !== null || selectedIds.length === 0}><Download className="h-5 w-5" />{downloading === "word" ? "生成中…" : "Wordで保存"}</Button>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => handleDownload("pdf", true)} disabled={downloading !== null || selectedIds.length === 0}><Download className="h-4 w-4" />{downloading === "answer-pdf" ? "生成中…" : "解答解説PDF"}</Button>
+            <Button size="sm" variant="outline" onClick={() => handleDownload("word", true)} disabled={downloading !== null || selectedIds.length === 0}><Download className="h-4 w-4" />{downloading === "answer-word" ? "生成中…" : "解答解説Word"}</Button>
+          </div>
         </div>
       </div>
       {message && <div className="border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700">{message}</div>}

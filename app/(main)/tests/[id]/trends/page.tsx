@@ -64,7 +64,7 @@ export default function TrendsPage({ params }: { params: Promise<{ id: string }>
   const [drafts, setDrafts] = useState<GeneratedProblemDraft[]>([]);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [bankSaving, setBankSaving] = useState(false);
-  const [downloading, setDownloading] = useState<"pdf" | "word" | null>(null);
+  const [downloading, setDownloading] = useState<"pdf" | "word" | "answer-pdf" | "answer-word" | null>(null);
 
   useEffect(() => {
     if (!trends) return;
@@ -224,19 +224,19 @@ export default function TrendsPage({ params }: { params: Promise<{ id: string }>
     finally { setBankSaving(false); }
   }
 
-  async function downloadGenerated(format: "pdf" | "word") {
+  async function downloadGenerated(format: "pdf" | "word", includeAnswers = false) {
     if (!generationJobId || !user) return;
     if (drafts.some((draft) => !draft.body.trim() || !draft.answer.trim() || !draft.explanation.trim() || draft.hints.some((hint) => !hint.trim()))) {
       setGenerationError("問題文・正答・解説・3段階のヒントをすべて入力してください。");
       return;
     }
-    setDownloading(format); setGenerationError(null);
+    setDownloading(includeAnswers ? (`answer-${format}` as const) : format); setGenerationError(null);
     try {
       await llmApi.updateProblemBatch(generationJobId, { user_id: user.id, problems: drafts });
-      const body = { duration_minutes: 50, total_points: previewTotalPoints || 100, title: `${test?.term ?? "定期"}テスト対策問題` };
+      const body = { duration_minutes: 50, total_points: previewTotalPoints || 100, title: `${test?.term ?? "定期"}テスト対策問題`, include_answers: includeAnswers };
       const filename = format === "pdf" ? await downloadGenerationPdf(generationJobId, body) : await downloadGenerationWord(generationJobId, body);
       setMessage(`${filename} をダウンロードしました。`);
-    } catch (err) { setGenerationError(err instanceof Error ? err.message : `${format === "pdf" ? "PDF" : "Word"}の生成に失敗しました。`); }
+    } catch (err) { setGenerationError(err instanceof Error ? err.message : `${includeAnswers ? "解答解説の" : ""}${format === "pdf" ? "PDF" : "Word"}の生成に失敗しました。`); }
     finally { setDownloading(null); }
   }
 
@@ -305,9 +305,14 @@ export default function TrendsPage({ params }: { params: Promise<{ id: string }>
     {!loading && !error && !llmLoading && rows.length === 0 && <EmptyBlock label="カメラまたは画像ファイルから過去テストを入力してください" />}
     {generationLoading && <LoadingBlock label={`元テストと同じ構成で${rows.length}問を生成しています…`} />}{generationError && <ErrorBlock message={generationError} />}
     {drafts.length > 0 && <section className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4"><div><p className="text-sm font-semibold text-blue-600">ステップ 3</p><h3 className="text-xl font-bold text-slate-950">問題プレビュー</h3><p className="mt-1 text-sm text-slate-600">学校で配布する用紙の内容を確認してください。</p></div><div className="grid w-full grid-cols-2 gap-3 sm:w-auto">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4"><div><p className="text-sm font-semibold text-blue-600">ステップ 3</p><h3 className="text-xl font-bold text-slate-950">問題プレビュー</h3><p className="mt-1 text-sm text-slate-600">学校で配布する用紙の内容を確認してください。</p></div><div className="flex w-full flex-col gap-2 sm:w-auto"><div className="grid grid-cols-2 gap-3">
         <Button size="lg" onClick={() => void downloadGenerated("pdf")} disabled={downloading !== null}><Download className="h-5 w-5" />{downloading === "pdf" ? "生成中…" : "PDFで保存"}</Button>
         <Button size="lg" variant="outline" onClick={() => void downloadGenerated("word")} disabled={downloading !== null} className="border-blue-600 text-blue-700 hover:bg-blue-50"><Download className="h-5 w-5" />{downloading === "word" ? "生成中…" : "Wordで保存"}</Button>
+      </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Button size="sm" variant="outline" onClick={() => void downloadGenerated("pdf", true)} disabled={downloading !== null}><Download className="h-4 w-4" />{downloading === "answer-pdf" ? "生成中…" : "解答解説PDF"}</Button>
+          <Button size="sm" variant="outline" onClick={() => void downloadGenerated("word", true)} disabled={downloading !== null}><Download className="h-4 w-4" />{downloading === "answer-word" ? "生成中…" : "解答解説Word"}</Button>
+        </div>
       </div></div>
       <div className="mx-auto w-full max-w-[794px] bg-white px-[68px] py-[52px] text-black shadow-sm ring-1 ring-slate-200" style={{ fontFamily: '"Yu Gothic", "BIZ UDPGothic", sans-serif' }}>
         <div className="text-center text-sm">{schoolName}</div>
