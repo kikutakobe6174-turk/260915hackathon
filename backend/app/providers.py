@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from collections import Counter
 
@@ -23,6 +24,35 @@ def relaxed_validation_enabled() -> bool:
     OFF（既定）にすれば従来の厳格検証に戻る。
     """
     return os.getenv("DEMO_RELAXED_VALIDATION", "false").lower() in {"1", "true", "yes", "on"}
+
+
+# 未完成だった問題を1問ずつ作り直す上限回数。
+MAX_PROBLEM_REGENERATIONS = 2
+
+
+# 生成が完了していないことが明らかな痕跡だけを弾く。数学の解説に普通に出る
+# 「確認」「訂正」「もう一度」のような一般語は対象にしない（誤検知の原因だったため）。
+UNFINISHED_PATTERNS = [
+    # 英語のプレースホルダ。数式の変数と衝突しないよう、英字に挟まれた場合は無視する。
+    (re.compile(r"(?<![A-Za-z])(TODO|TBD|FIXME|PLACEHOLDER|LOREM IPSUM)(?![A-Za-z])", re.IGNORECASE), "プレースホルダが残っています"),
+    # 「ここに問題を入力」「ここに解答を記入」など、雛形のまま返ってきたもの。
+    (re.compile(r"ここに.{0,8}(入力|記入|記述|挿入)"), "入力欄の雛形が残っています"),
+    # 指示文がそのまま本文に出力されたもの。
+    (re.compile(r"(問題文|問題|解答|正答|解説|ヒント)を(生成|作成|入力|記入)してください"), "指示文がそのまま出力されています"),
+    # 未置換のテンプレート変数。
+    (re.compile(r"\{\{.*?\}\}|\[\[.*?\]\]|＜＜.*?＞＞|<<.*?>>"), "未置換のテンプレート変数が残っています"),
+    # 完成稿には現れない独り言・謝罪。自己訂正の途中経過がそのまま残った出力を拾う。
+    (re.compile(r"おっと|あっ、|すみません|失礼しました|申し訳(あり|ござ)"), "思考途中の独り言が残っています"),
+]
+
+
+class UnfinishedProblemsError(ValueError):
+    """バッチ内の一部の問題だけが未完成だったことを、対象の番号つきで伝える。"""
+
+    def __init__(self, problems: list[GeneratedProblem], defects: dict[int, str]):
+        super().__init__("; ".join(f"#{index + 1}: {reason}" for index, reason in sorted(defects.items())))
+        self.problems = problems
+        self.defects = defects
 
 
 class LLMProviderError(Exception):
@@ -172,27 +202,26 @@ class GeminiProvider(LLMProvider):
             f"仕様: {json.dumps(specifications, ensure_ascii=False)}\n単元: {json.dumps(units, ensure_ascii=False)}\n形式: {json.dumps(formats, ensure_ascii=False)}"
         )
         raw = await self._request([{"text": prompt}], GeminiProblemOutput.model_json_schema())
-        try:
-            self._validate_generated_problems(raw, specifications)
-            candidate = raw
-        except (ValidationError, ValueError):
+        accepted, _ = await self._accept_or_regenerate(raw, specifications, units, formats)
+        if accepted is not None:
+            candidate = self._as_payload(accepted)
+        else:
             repair_prompt = (
-                "前回の生成には、空欄、ヒント不足、または解説中の自己訂正がありました。全問を最初から解き直し、"
+                "前回の生成には、空欄、ヒント不足、または未完成の痕跡がありました。全問を最初から解き直し、"
                 "問題文・正答・解説が一致する完成稿だけを返してください。問題文の条件や点を解説途中で変更してはいけません。"
-                "『あれ』『待てよ』『見直す』『別な点』『こちらを正解』のような途中思考は禁止です。\n"
+                "TODO・未入力の雛形・指示文・独り言を残してはいけません。\n"
                 f"仕様: {json.dumps(specifications, ensure_ascii=False)}\n単元: {json.dumps(units, ensure_ascii=False)}\n"
                 f"形式: {json.dumps(formats, ensure_ascii=False)}\n前回出力: {json.dumps(raw, ensure_ascii=False)}"
             )
             repaired = await self._request([{"text": repair_prompt}], GeminiProblemOutput.model_json_schema())
-            try:
-                self._validate_generated_problems(repaired, specifications)
+            accepted, error = await self._accept_or_regenerate(repaired, specifications, units, formats)
+            if accepted is not None:
+                candidate = self._as_payload(accepted)
+            elif relaxed_validation_enabled() and self._minimally_valid_problems(repaired) is not None:
+                logger.warning("relaxed validation accepted: problem generation (%s)", error)
                 candidate = repaired
-            except (ValidationError, ValueError) as exc:
-                if relaxed_validation_enabled() and self._minimally_valid_problems(repaired) is not None:
-                    logger.warning("relaxed validation accepted: problem generation (%s)", exc)
-                    candidate = repaired
-                else:
-                    raise LLMProviderError("GEMINI_SCHEMA_ERROR", "再生成後も問題文・正答・解説の検証条件を満たしませんでした。内容を変えて再試行してください。") from exc
+            else:
+                raise LLMProviderError("GEMINI_SCHEMA_ERROR", "再生成後も問題文・正答・解説の検証条件を満たしませんでした。内容を変えて再試行してください。") from error
 
         review_prompt = (
             "次の問題セットを数学の校閲者として全問独立に解き直してください。問題文の条件、正答、解説の計算が"
@@ -203,8 +232,41 @@ class GeminiProvider(LLMProvider):
             f"仕様: {json.dumps(specifications, ensure_ascii=False)}\n校閲対象: {json.dumps(candidate, ensure_ascii=False)}"
         )
         reviewed = await self._request([{"text": review_prompt}], GeminiProblemOutput.model_json_schema())
+        accepted, error = await self._accept_or_regenerate(reviewed, specifications, units, formats)
+        if accepted is not None:
+            return accepted
+        if relaxed_validation_enabled():
+            # 校閲後の出力を優先し、それが構造的に壊れていれば校閲前の完成稿へ戻す。
+            fallback = self._minimally_valid_problems(reviewed) or self._minimally_valid_problems(candidate)
+            if fallback is not None:
+                logger.warning("relaxed validation accepted: math review (%s)", error)
+                return fallback
+        raise LLMProviderError("GEMINI_SCHEMA_ERROR", "数学校閲後も問題文・正答・解説の検証条件を満たしませんでした。再試行してください。") from error
+
+    @staticmethod
+    def _as_payload(problems: list[GeneratedProblem]) -> dict:
+        return {"problems": [problem.model_dump(exclude={"id"}) for problem in problems]}
+
+    async def _accept_or_regenerate(
+        self,
+        raw: dict,
+        specifications: list[dict],
+        units: list[dict],
+        formats: list[dict],
+    ) -> tuple[list[GeneratedProblem] | None, Exception | None]:
+        """検証を通ればその問題群を返す。
+
+        一部の問題だけが未完成だった場合は、バッチ全体を捨てずにその問題だけ作り直す。
+        構造が壊れている・構成が仕様と合わない場合は (None, 例外) を返し、
+        呼び出し側のバッチ再生成やエラー処理へ委ねる。
+        """
         try:
-            return self._validate_generated_problems(reviewed, specifications)
+            return self._validate_generated_problems(raw, specifications), None
+        except UnfinishedProblemsError as exc:
+            regenerated = await self._regenerate_defective(exc.problems, exc.defects, units, formats)
+            return regenerated, None if regenerated is not None else exc
+        except (ValidationError, ValueError) as exc:
+            return None, exc
         except (ValidationError, ValueError) as exc:
             if relaxed_validation_enabled():
                 # 校閲後の出力を優先し、それが構造的に壊れていれば校閲前の完成稿へ戻す。
@@ -213,6 +275,66 @@ class GeminiProvider(LLMProvider):
                     logger.warning("relaxed validation accepted: math review (%s)", exc)
                     return fallback
             raise LLMProviderError("GEMINI_SCHEMA_ERROR", "数学校閲後も問題文・正答・解説の検証条件を満たしませんでした。再試行してください。") from exc
+
+    async def _regenerate_defective(
+        self,
+        problems: list[GeneratedProblem],
+        defects: dict[int, str],
+        units: list[dict],
+        formats: list[dict],
+    ) -> list[GeneratedProblem] | None:
+        """未完成だった問題だけを1問ずつ作り直す。全問そろえば差し替え済みの一覧を返す。
+
+        MAX_PROBLEM_REGENERATIONS 回試しても直らない問題が残った場合は None を返し、
+        呼び出し側に従来のエラー（または緩和モードの判断）を任せる。
+        """
+        repaired = list(problems)
+        for index, reason in sorted(defects.items()):
+            target = repaired[index]
+            for attempt in range(1, MAX_PROBLEM_REGENERATIONS + 1):
+                logger.warning(
+                    "regenerating unfinished problem #%s (%s) attempt %s/%s",
+                    index + 1, reason, attempt, MAX_PROBLEM_REGENERATIONS,
+                )
+                replacement = await self._regenerate_one(target, units, formats, reason)
+                if replacement is not None:
+                    repaired[index] = replacement
+                    break
+            else:
+                logger.warning("gave up regenerating problem #%s (%s)", index + 1, reason)
+                return None
+        return repaired
+
+    async def _regenerate_one(
+        self,
+        target: GeneratedProblem,
+        units: list[dict],
+        formats: list[dict],
+        reason: str,
+    ) -> GeneratedProblem | None:
+        """1問だけ作り直す。単元・形式・難易度は変えない。"""
+        prompt = (
+            f"次の問題は{reason}。同じunit_id/format_id/difficultyのまま、完成した問題を1問だけ作り直してください。"
+            "問題文、正答、解説、易しい順に3段階のヒントをすべて埋め、最後まで解き直して"
+            "問題文の条件・正答・解説が数学的に一致することを確認してください。"
+            "TODO・未入力の雛形・指示文・独り言は残さず、完成稿だけを返してください。\n"
+            f"作り直す問題: {json.dumps(target.model_dump(exclude={'id'}), ensure_ascii=False)}\n"
+            f"単元: {json.dumps(units, ensure_ascii=False)}\n形式: {json.dumps(formats, ensure_ascii=False)}"
+        )
+        # LLMProviderError（無料枠超過・認証エラー等）はそのまま伝播させ、
+        # QuotaTemplateProvider のフォールバック判定を壊さないようにする。
+        raw = await self._request([{"text": prompt}], GeminiProblemOutput.model_json_schema())
+        try:
+            validated = GeminiProblemOutput.model_validate(raw)
+            candidates = [GeneratedProblem.model_validate(problem.model_dump()) for problem in validated.problems]
+        except ValidationError as exc:
+            logger.warning("regenerated problem was not usable (%s)", exc)
+            return None
+        for candidate in candidates:
+            same_slot = (candidate.unit_id, candidate.format_id, candidate.difficulty) == (target.unit_id, target.format_id, target.difficulty)
+            if same_slot and self._defect_of(candidate) is None:
+                return candidate
+        return None
 
     @staticmethod
     def _minimally_valid_problems(raw: dict) -> list[GeneratedProblem] | None:
@@ -231,6 +353,21 @@ class GeminiProvider(LLMProvider):
         return problems or None
 
     @staticmethod
+    def _defect_of(problem: GeneratedProblem) -> str | None:
+        """未完成な生成物だけを検出する。正常な数学の言い回しには反応させない。
+
+        「確認してください」「訂正すると」「もう一度計算すると」のような一般語は、
+        完成した解説にも普通に現れるため検出対象にしない。プレースホルダが残っている、
+        指示文がそのまま出力されている、独り言が混ざっている、といった
+        「生成が完了していないことが明らかな痕跡」だけを弾く。
+        """
+        text = "\n".join([problem.body, problem.answer, problem.explanation, *problem.hints])
+        for pattern, reason in UNFINISHED_PATTERNS:
+            if pattern.search(text):
+                return reason
+        return None
+
+    @staticmethod
     def _validate_generated_problems(raw: dict, specifications: list[dict]) -> list[GeneratedProblem]:
         validated = GeminiProblemOutput.model_validate(raw)
         problems = [GeneratedProblem.model_validate(problem.model_dump()) for problem in validated.problems]
@@ -238,12 +375,9 @@ class GeminiProvider(LLMProvider):
         actual = Counter((problem.unit_id, problem.format_id, problem.difficulty) for problem in problems)
         if actual != expected:
             raise ValueError("指定された構成または問題数と一致しません")
-        unfinished_markers = (
-            "あれ", "待て", "見直す", "別な点", "別な問題", "こちらを正解", "計算確認", "再確認",
-            "訂正", "問題の意図", "念のため", "もう一度", "計算ミス", "修正する", "変更する",
-        )
-        if any(marker in f"{problem.body}\n{problem.answer}\n{problem.explanation}" for problem in problems for marker in unfinished_markers):
-            raise ValueError("思考途中または自己訂正を含む問題です")
+        defects = {index: defect for index, problem in enumerate(problems) if (defect := GeminiProvider._defect_of(problem))}
+        if defects:
+            raise UnfinishedProblemsError(problems, defects)
         return problems
 
 

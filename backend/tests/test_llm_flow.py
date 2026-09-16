@@ -207,7 +207,7 @@ def test_generation_with_self_correction_is_regenerated_once():
 
         async def _request(self, parts, schema):
             self.calls += 1
-            explanation = "あれ、計算が違う。別な点にしよう。" if self.calls == 1 else "2^3=8なので、指数を比較してx=3です。"
+            explanation = "おっと、計算が違う。正しくは別の値だった。" if self.calls == 1 else "2^3=8なので、指数を比較してx=3です。"
             return {"problems": [{
                 "unit_id": 204, "format_id": 1, "difficulty": 1,
                 "body": "2^x=8を解きなさい。", "answer": "x=3", "explanation": explanation,
@@ -222,4 +222,4 @@ def test_generation_with_self_correction_is_regenerated_once():
     ))
     assert provider.calls == 3
     assert result[0].answer == "x=3"
-    assert "あれ" not in result[0].explanation
+    assert "おっと" not in result[0].explanation

@@ -17,8 +17,8 @@ def _problem(**overrides):
     problem = {
         "unit_id": 204, "format_id": 1, "difficulty": 1,
         "body": "2^x = 8 を解きなさい。", "answer": "x = 3",
-        # 「訂正」は unfinished_markers に含まれるため、厳格モードでは弾かれる
-        "explanation": "8 = 2^3 なので指数を比較します。訂正はありません。",
+        # 「おっと」は完成稿に現れない独り言なので、厳格モードでは未完成として弾かれる
+        "explanation": "8 = 2^3 なので指数を比較します。おっと、書き直します。",
         "hints": ["底をそろえる", "8を累乗で表す", "指数を比較する"],
     }
     problem.update(overrides)
@@ -42,7 +42,7 @@ def _generate(provider):
     return asyncio.run(provider.generate_problems(SPECS, UNITS, FORMATS))
 
 
-def test_strict_mode_rejects_unfinished_marker(monkeypatch):
+def test_strict_mode_rejects_unfinished_output(monkeypatch):
     monkeypatch.delenv("DEMO_RELAXED_VALIDATION", raising=False)
     provider = StubProvider({"problems": [_problem()]})
     with pytest.raises(LLMProviderError) as excinfo:
@@ -50,7 +50,7 @@ def test_strict_mode_rejects_unfinished_marker(monkeypatch):
     assert excinfo.value.code == "GEMINI_SCHEMA_ERROR"
 
 
-def test_relaxed_mode_accepts_unfinished_marker(monkeypatch):
+def test_relaxed_mode_accepts_unfinished_output(monkeypatch):
     monkeypatch.setenv("DEMO_RELAXED_VALIDATION", "true")
     provider = StubProvider({"problems": [_problem()]})
     problems = _generate(provider)
