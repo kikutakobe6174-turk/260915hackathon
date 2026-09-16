@@ -40,3 +40,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local backend data
+/backend/data/
+/backend/.venv/
+/backend/.test-deps/
+/backend/.runtime/
+__pycache__/
+.pytest_cache/
+/backend/.pytest-run-*/

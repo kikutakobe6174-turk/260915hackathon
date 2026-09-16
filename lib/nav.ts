@@ -9,9 +9,8 @@ export interface NavItem {
 // トップレベルのナビゲーション。teacher には MASTER・TEST_NEW 系を見せない。
 export const MAIN_NAV: NavItem[] = [
   { label: "ホーム", href: "/", roles: ["operator", "teacher"] },
-  { label: "マスタ管理", href: "/masters/schools", roles: ["operator"] },
-  { label: "テスト一覧", href: "/tests", roles: ["operator", "teacher"] },
-  { label: "授業回一覧", href: "/lessons", roles: ["operator", "teacher"] },
+  { label: "過去問分析", href: "/tests", roles: ["operator", "teacher"] },
+  { label: "問題バンク", href: "/problem-bank", roles: ["operator", "teacher"] },
 ];
 
 // テスト詳細内のタブ。TRENDS・WS はteacher非表示。

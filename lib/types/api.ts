@@ -107,6 +107,7 @@ export interface TrendItemIn {
   question_no: string;
   points: number;
   difficulty: Difficulty;
+  confidence?: number | null;
   source: "manual" | "llm";
   llm_job_id?: number | null;
 }
@@ -126,6 +127,7 @@ export interface TrendItemOut {
   question_no: string;
   points: number;
   difficulty: Difficulty;
+  confidence: number | null;
   source: "manual" | "llm";
   llm_job_id: number | null;
   reviewed: boolean;
@@ -238,6 +240,7 @@ export interface ProblemReviewRequest {
 }
 
 export interface ProblemListQuery {
+  test_id?: number;
   unit_id?: number;
   format_id?: number;
   difficulty?: number;
@@ -439,7 +442,66 @@ export interface TrendDraftItemOut {
 export interface TrendDraftResponse {
   job_id: number;
   image_discarded: boolean;
+  status: "draft" | "confirmed";
+  total_points: number;
   items: TrendDraftItemOut[];
+  fallback_mode?: "quota_template" | null;
+  notice?: string | null;
+}
+
+export interface PdfExportRequest {
+  problem_ids: number[];
+  duration_minutes: number;
+  total_points: number;
+  title?: string;
+}
+
+export interface GenerationExportRequest {
+  duration_minutes: number;
+  total_points: number;
+  title?: string;
+}
+
+export interface TrendDraftUpdateRequest {
+  user_id: number;
+  total_points: number;
+  items: TrendDraftItemOut[];
+}
+
+export interface JobActionRequest {
+  user_id: number;
+}
+
+export interface GeneratedProblemDraft {
+  id?: number | null;
+  unit_id: number;
+  format_id: number;
+  difficulty: Difficulty;
+  body: string;
+  answer: string;
+  explanation: string;
+  hints: [string, string, string];
+}
+
+export interface GenerationJobResponse {
+  job_id: number;
+  analysis_job_id: number;
+  status: "draft" | "saved";
+  problems: GeneratedProblemDraft[];
+  fallback_mode?: "quota_template" | null;
+  notice?: string | null;
+}
+
+export interface SaveGenerationRequest {
+  user_id: number;
+  problems: GeneratedProblemDraft[];
+}
+
+export interface SaveGenerationResponse {
+  job_id: number;
+  analysis_job_id: number;
+  saved: number;
+  problem_ids: number[];
 }
 
 export interface PrereqSuggestRequest {

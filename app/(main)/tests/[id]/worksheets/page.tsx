@@ -2,7 +2,7 @@
 
 import { use, useState } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { FileText, Plus } from "lucide-react";
 import { worksheetsApi } from "@/lib/api/worksheets";
 import { useApiData } from "@/lib/hooks/useApiData";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,11 @@ export default function WorksheetsPage({ params }: { params: Promise<{ id: strin
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold text-slate-900">冊子構成</h2>
         <div className="flex items-center gap-2">
+          <Button asChild size="sm" variant="outline">
+            <Link href={`/tests/${testId}/print-preview`}>
+              <FileText className="h-4 w-4" />印刷プレビュー・PDF出力
+            </Link>
+          </Button>
           <Select value={newLevel} onValueChange={(v) => setNewLevel(v as Level)}>
             <SelectTrigger className="w-24">
               <SelectValue />

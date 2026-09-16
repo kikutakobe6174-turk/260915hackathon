@@ -1,17 +1,34 @@
 # ひかり塾 定期テスト演習 準備＆記録システム（フロントエンド）
 
-集団授業塾向けの「学校別・定期テスト演習」準備＆記録システムの MVP フロントエンド（Next.js App Router + TypeScript）。
-バックエンドは別リポジトリ（`kikut/260915hackathon-back`, FastAPI + SQLAlchemy + SQLite）。このフロントエンドは単体では動作せず、バックエンドを先に起動しておく必要があります。
+集団授業塾向けの「学校別・定期テスト演習」準備＆記録システムです。Next.jsフロントエンドと、Gemini画像解析・問題生成・SQLite永続化を担うFastAPIバックエンドを同じリポジトリに収録しています。
 
-## セットアップ
+## セットアップと起動
 
-```bash
+### 1. バックエンド
+
+Python 3.11以上を用意し、PowerShellで次を実行します。
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+# .env を開き、GEMINI_API_KEY を設定
+python run.py
+```
+
+`http://127.0.0.1:8000` で起動し、初回起動時に `backend/data/app.db` とseedデータを作成します。APIキーを設定しない場合もマスタ・テスト・問題APIは利用できますが、LLM機能は固定データへ切り替わらず、日本語の設定エラーを返します。
+
+### 2. フロントエンド
+
+```powershell
 npm install
-copy .env.local.example .env.local
+Copy-Item .env.local.example .env.local
 npm run dev
 ```
 
-`http://localhost:3000` で起動します。あらかじめバックエンド（`http://127.0.0.1:8000`）を起動しておいてください（`kikut/260915hackathon-back/backend` の README を参照）。
+`http://localhost:3000` で起動します。先にバックエンドを起動してください。
 
 ## 環境変数（`.env.local`）
 
@@ -20,6 +37,39 @@ npm run dev
 | `NEXT_PUBLIC_API_BASE_URL` | バックエンド（FastAPI）のベースURL | `http://localhost:8000` |
 
 バックエンド側の `CORS_ORIGIN` は、このフロントエンドを配信するオリジン（例 `http://localhost:3000`、スマホ実機で試す場合は後述のHTTPS URL）に合わせて設定してください。
+
+### バックエンド環境変数（`backend/.env`）
+
+| 変数 | 説明 | デフォルト |
+|---|---|---|
+| `GEMINI_API_KEY` | Google AI Studioで発行したAPIキー。バックエンドだけが読む | なし（LLM APIは明示的エラー） |
+| `GEMINI_MODEL` | 画像入力・構造化出力対応のGeminiモデル | `gemini-3.5-flash-lite` |
+| `GEMINI_QUOTA_TEMPLATE_FALLBACK` | Geminiが429を返した場合だけ分析・問題テンプレートへ切り替える | `true` |
+| `CORS_ORIGIN` | 許可するフロントエンドorigin。カンマ区切り可 | `http://localhost:3000` |
+| `DATABASE_PATH` | SQLiteファイル | `backend/data/app.db` |
+
+`GEMINI_API_KEY` は `NEXT_PUBLIC_` で始まる変数や `.env.local` へ入れないでください。`backend/.env` は `.gitignore` の対象です。
+
+無料枠またはレート上限によるHTTP 429のときだけ、編集可能なローカルテンプレートへ切り替わります。テンプレートは元資料を解析した結果ではないため、画面に警告を表示し、ジョブのproviderも `quota-template` として通常のGemini結果と区別します。APIキー未設定・認証失敗・ネットワーク障害では切り替わりません。
+
+## メインフロー（分析からPDF・Word保存まで）
+
+1. seedの `operator1 / password123` でログインし、テスト一覧からseedテストを開きます。
+2. ホーム中央へ画像またはPDFをドラッグ＆ドロップし、「分析する」を押します。対応形式はPDF・JPEG・PNG・WebPです。
+3. Geminiの解析後、難しさ・単元・問題形式・出題量の4カードを確認します。小問番号・配点・確信度は「詳細を見る」で確認・修正できます。
+4. 大きな「この分析をもとに問題を生成」を押すと、必要に応じて解析を確定し、`単元×形式×難易度` の構成と同じ問題群を生成します。
+5. 学校配布用のA4プレビューを確認し、「PDFで保存」または「Wordで保存」を押します。編集した問題は出力前に下書きへ反映されます。
+6. 問題編集や問題バンクへの一括保存は、プレビュー下部の詳細欄から行えます。
+
+## 学校配布用PDF・Wordの作成
+
+1. テスト詳細の「問題バンク」または「冊子構成」を開きます。
+2. 「印刷プレビュー・PDF出力」を押し、収録する問題、制限時間、満点を確認します。
+3. 「PDFで保存」または「Wordで保存」を押すと、FastAPIがファイルを生成し、`2026_高2_数学II_2学期中間_対策問題.pdf` / `.docx` のような名前でダウンロードします。
+
+PDFはWeb画面のスクリーンショットではありません。ReportLabでA4用紙を組版します。Wordはpython-docxで編集可能なA4文書を生成します。どちらも学校名・学年・科目・氏名欄・得点欄・大問・小問・配点・解答欄・ページ番号を含み、AI・ジョブID・難易度などの管理情報は出力されません。
+
+入力画像はブラウザでの確認・再試行中だけ保持し、確定時に破棄します。バックエンドは画像をファイルやDBへ保存しません。解析ジョブIDと生成ジョブIDは別々に永続化され、問題には `source: "llm"`、生成ジョブID、親の解析ジョブIDが保存されます。
 
 ## 初期ユーザー（バックエンドのseedスクリプトで作成）
 
@@ -35,6 +85,8 @@ npm run dev
 ```bash
 npm run test        # 1回実行
 npm run test:watch  # watchモード
+npm run lint
+npm run build
 ```
 
 Vitest + React Testing Library を使用しています。
@@ -42,6 +94,20 @@ Vitest + React Testing Library を使用しています。
 - `__tests__/answerSheetGrid.test.ts` — 解答用紙入力のキーボード操作（O/X=正誤, 0-3=ヒント段階, R=戻り, C=赤カード, Enter/↓/↑=行移動）と、戻り問題を元の問題の直後に字下げ表示する並び替えロジックの単体テスト
 - `__tests__/AnswerSheetPage.test.tsx` — 解答用紙入力画面のキーボード操作の結合テスト（APIをモックし、実際のキー入力→保存→矛盾チェック警告表示までを検証）
 - `__tests__/CameraCapture.test.tsx` — カメラ共通コンポーネントのエラー時フォールバック（`getUserMedia` をモックし、権限拒否・カメラなし・非対応ブラウザそれぞれでファイル選択フォールバックが表示されることを検証）
+
+バックエンドの通常テストはGemini通信を `FakeProvider` に差し替え、画像解析→修正→確定→同数生成→編集→問題バンク保存と、ジョブIDの関連を検証します。
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+pytest -q
+```
+
+`backend/.env` に実際の `GEMINI_API_KEY` がある場合だけ、次のテストも実通信します（未設定時はskip）。
+
+```powershell
+pytest -q tests/test_gemini_smoke.py
+```
 
 ## スマホ実機でカメラ機能を試す方法
 
@@ -61,6 +127,7 @@ Vitest + React Testing Library を使用しています。
 - Next.js（App Router）+ TypeScript
 - Tailwind CSS + Radix UI（shadcn/ui流の自前コンポーネント）
 - KaTeX（問題文のLaTeXレンダリング）
+- ReportLab（日本語フォント埋め込みの学校配布用PDF生成）
 - Vitest + React Testing Library（テスト）
 - バックエンドとの通信はすべてJSON（画像もbase64でJSONに含めて送信）
 

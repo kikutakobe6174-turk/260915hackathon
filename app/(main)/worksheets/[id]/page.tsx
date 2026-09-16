@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Printer, Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { worksheetsApi } from "@/lib/api/worksheets";
 import { problemsApi } from "@/lib/api/problems";
@@ -54,9 +55,9 @@ export default function WorksheetDetailPage({ params }: { params: Promise<{ id: 
     () => (worksheet ? testsApi.get(worksheet.test_id) : Promise.resolve(null)),
     [worksheet?.test_id]
   );
-  const reviewedProblems = useApiData(
-    () => problemsApi.list({ status: "reviewed" }),
-    []
+  const availableProblemData = useApiData(
+    () => problemsApi.list(worksheet ? { test_id: worksheet.test_id } : undefined),
+    [worksheet?.test_id]
   );
   const allUnits = useApiData(async () => {
     const textbooks = await textbooksApi.list();
@@ -97,18 +98,18 @@ export default function WorksheetDetailPage({ params }: { params: Promise<{ id: 
   if (error) return <ErrorBlock message={error} />;
   if (!worksheet) return null;
 
-  const problemInfo = (id: number) => reviewedProblems.data?.find((p) => p.id === id);
+  const problemInfo = (id: number) => availableProblemData.data?.find((p) => p.id === id);
   const unitName = (id: number) => allUnits.data?.find((u) => u.id === id)?.name ?? `#${id}`;
   const formatName = (id: number) => formats.data?.find((f) => f.id === id)?.name ?? `#${id}`;
 
   const itemNos = computeItemNos(items);
   const mainItems = items.filter((it) => !it.isReturn);
   const usedProblemIds = new Set(items.map((it) => it.problemId));
-  const availableProblems = (reviewedProblems.data ?? []).filter((p) => !usedProblemIds.has(p.id));
+  const availableProblems = (availableProblemData.data ?? []).filter((p) => !usedProblemIds.has(p.id));
 
   function addProblem() {
     if (!pickProblemId) return;
-    const problem = reviewedProblems.data?.find((p) => p.id === Number(pickProblemId));
+    const problem = availableProblemData.data?.find((p) => p.id === Number(pickProblemId));
     if (!problem) return;
     setItems((its) => [
       ...its,
@@ -193,16 +194,15 @@ export default function WorksheetDetailPage({ params }: { params: Promise<{ id: 
             </p>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={() => window.print()}>
-          <Printer className="h-4 w-4" />
-          印刷
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/tests/${worksheet.test_id}/print-preview`}><Printer className="h-4 w-4" />印刷プレビュー・PDF出力</Link>
         </Button>
       </div>
 
       <div className="no-print flex items-center gap-2">
         <Select value={pickProblemId} onValueChange={setPickProblemId}>
           <SelectTrigger className="w-96">
-            <SelectValue placeholder="確認済み問題を選択して追加" />
+            <SelectValue placeholder="問題バンクから追加" />
           </SelectTrigger>
           <SelectContent>
             {availableProblems.map((p) => (

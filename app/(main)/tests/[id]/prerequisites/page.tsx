@@ -1,11 +1,10 @@
 "use client";
 
 import { use, useState } from "react";
-import { Plus, Trash2, Sparkles } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { prerequisitesApi } from "@/lib/api/tests";
 import { testsApi } from "@/lib/api/tests";
 import { unitsApi } from "@/lib/api/masters";
-import { llmApi } from "@/lib/api/llm";
 import { useApiData } from "@/lib/hooks/useApiData";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -142,8 +141,6 @@ function PrerequisiteSetEditor({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   function addRow() {
     const candidate = allUnits.find(
@@ -154,34 +151,6 @@ function PrerequisiteSetEditor({
       ...rs,
       { prerequisite_unit_id: candidate.id, reason: "", source: "manual" as const, llm_job_id: null },
     ]);
-  }
-
-  async function suggest() {
-    if (!user) return;
-    setSuggesting(true);
-    setSuggestError(null);
-    try {
-      const res = await llmApi.prereqSuggest({ unit_id: unitId, user_id: user.id });
-      const newOnes = res.suggestions.filter(
-        (s) => !editRows.some((r) => r.prerequisite_unit_id === s.prerequisite_unit_id)
-      );
-      setEditRows((rs) => [
-        ...rs,
-        ...newOnes.map((s) => ({
-          prerequisite_unit_id: s.prerequisite_unit_id,
-          reason: s.reason,
-          source: "llm" as const,
-          llm_job_id: res.job_id,
-        })),
-      ]);
-      if (newOnes.length === 0 && res.suggestions.length === 0) {
-        setSuggestError("候補が見つかりませんでした。");
-      }
-    } catch (err) {
-      setSuggestError(err instanceof ApiRequestError ? err.message : "候補の取得に失敗しました");
-    } finally {
-      setSuggesting(false);
-    }
   }
 
   async function save() {
@@ -212,17 +181,12 @@ function PrerequisiteSetEditor({
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-slate-700">前提単元の編集</span>
           <div className="flex gap-2">
-            <Button size="sm" variant="llm" onClick={suggest} disabled={suggesting}>
-              <Sparkles className="h-4 w-4" />
-              {suggesting ? "提案中…" : "候補を提案"}
-            </Button>
             <Button size="sm" variant="outline" onClick={addRow}>
               <Plus className="h-4 w-4" />
               追加
             </Button>
           </div>
         </div>
-        {suggestError && <ErrorBlock message={suggestError} />}
         {editRows.map((r, i) => (
           <div key={i} className="flex items-center gap-2">
             {r.source === "llm" && <Badge variant="llm">LLM</Badge>}

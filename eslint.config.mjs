@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "backend/.venv/**",
+    "backend/.runtime/**",
+    "backend/.test-deps/**",
+    "backend/.pytest_cache/**",
+    "backend/.pytest-run-*/**",
   ]),
 ]);
 
