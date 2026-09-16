@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { testsApi } from "@/lib/api/tests";
@@ -28,7 +28,11 @@ export default function TestLayout({
   const schools = useApiData(() => schoolsApi.list(), []);
   const textbooks = useApiData(() => textbooksApi.list(), []);
 
-  const tabs = user ? filterNavByRole(testTabs(testId), user.role) : [];
+  const allTabs = user ? filterNavByRole(testTabs(testId), user.role) : [];
+  const tabs = allTabs.filter((tab) => !tab.secondary);
+  const secondaryTabs = allTabs.filter((tab) => tab.secondary);
+  const onSecondaryTab = secondaryTabs.some((tab) => pathname.startsWith(tab.href));
+  const [othersOpen, setOthersOpen] = useState(onSecondaryTab);
   const schoolName = test ? schools.data?.find((s) => s.id === test.school_id)?.name : undefined;
   const textbookTitle = test
     ? textbooks.data?.find((t) => t.id === test.textbook_id)?.title
@@ -73,6 +77,43 @@ export default function TestLayout({
             </Link>
           );
         })}
+
+        {secondaryTabs.length > 0 && (
+          <div className="relative ml-auto">
+            <button
+              type="button"
+              aria-expanded={othersOpen}
+              onClick={() => setOthersOpen((value) => !value)}
+              className={cn(
+                "border-b-2 px-3 py-2 text-sm font-medium",
+                onSecondaryTab
+                  ? "border-slate-900 text-slate-900"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
+              )}
+            >
+              その他 ▾
+            </button>
+            {othersOpen && (
+              <div className="absolute right-0 top-full z-20 mt-1 flex w-52 flex-col rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                {secondaryTabs.map((tab) => (
+                  <Link
+                    key={tab.href}
+                    href={tab.href}
+                    onClick={() => setOthersOpen(false)}
+                    className={cn(
+                      "px-3 py-2 text-sm",
+                      pathname.startsWith(tab.href)
+                        ? "bg-slate-100 font-medium text-slate-900"
+                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                    )}
+                  >
+                    {tab.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {children}
