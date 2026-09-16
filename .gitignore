@@ -49,3 +49,10 @@ next-env.d.ts
 __pycache__/
 .pytest_cache/
 /backend/.pytest-run-*/
+
+# generated documents (PDF/Word出力の検証成果物。ローカルには残す)
+/output/
+/tmp/
+
+# 予備・退避した仮想環境
+/backend/.venv-*/
