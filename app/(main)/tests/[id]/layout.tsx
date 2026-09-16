@@ -8,6 +8,7 @@ import { schoolsApi, textbooksApi } from "@/lib/api/masters";
 import { useApiData } from "@/lib/hooks/useApiData";
 import { useAuth } from "@/contexts/AuthContext";
 import { testTabs, filterNavByRole } from "@/lib/nav";
+import { isUnavailableRoute } from "@/lib/featureFlags";
 import { cn } from "@/lib/utils";
 import { TEST_KIND_LABEL } from "@/lib/constants";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +29,9 @@ export default function TestLayout({
   const schools = useApiData(() => schoolsApi.list(), []);
   const textbooks = useApiData(() => textbooksApi.list(), []);
 
-  const allTabs = user ? filterNavByRole(testTabs(testId), user.role) : [];
+  const allTabs = user
+    ? filterNavByRole(testTabs(testId), user.role).filter((tab) => !isUnavailableRoute(tab.href))
+    : [];
   const tabs = allTabs.filter((tab) => !tab.secondary);
   const secondaryTabs = allTabs.filter((tab) => tab.secondary);
   const onSecondaryTab = secondaryTabs.some((tab) => pathname.startsWith(tab.href));

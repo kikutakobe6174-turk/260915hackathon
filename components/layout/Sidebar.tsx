@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { MAIN_NAV, SECONDARY_NAV, filterNavByRole } from "@/lib/nav";
+import { isUnavailableRoute } from "@/lib/featureFlags";
 import { cn } from "@/lib/utils";
 import { ChevronDown, FileSearch, Home, Library, Settings2 } from "lucide-react";
 
@@ -17,7 +18,10 @@ const NAV_ICONS = {
 export function Sidebar() {
   const { user } = useAuth();
   const pathname = usePathname();
-  const secondaryItems = user ? filterNavByRole(SECONDARY_NAV, user.role) : [];
+  // 未実装でエラーになる画面はメニューに出さない（lib/featureFlags.ts の1箇所で制御）。
+  const secondaryItems = user
+    ? filterNavByRole(SECONDARY_NAV, user.role).filter((item) => !isUnavailableRoute(item.href))
+    : [];
   const onSecondaryPage = secondaryItems.some((item) => pathname.startsWith(item.href));
   const [othersOpen, setOthersOpen] = useState(onSecondaryPage);
 

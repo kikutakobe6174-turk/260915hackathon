@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { SECONDARY_NAV } from "@/lib/nav";
+import { isUnavailableRoute } from "@/lib/featureFlags";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("@/contexts/AuthContext", () => ({
@@ -14,31 +15,28 @@ vi.mock("@/contexts/AuthContext", () => ({
 }));
 
 describe("Sidebar", () => {
-  it("メインフローの導線だけを常時表示する", () => {
+  it("メインフローの導線だけを表示する", () => {
     render(<Sidebar />);
 
     expect(screen.getByRole("link", { name: /ホーム/ })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: /過去問分析/ })).toHaveAttribute("href", "/tests");
     expect(screen.getByRole("link", { name: /問題バンク/ })).toHaveAttribute("href", "/problem-bank");
-
-    // 管理機能は初期表示では見えない（塾講師がメイン機能以外に気を取られないため）
-    expect(screen.queryByRole("link", { name: "学校マスタ" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "授業回一覧" })).not.toBeInTheDocument();
   });
 
-  it("「その他」を押すと管理機能が出る（削除ではなく格納されている）", async () => {
-    const user = userEvent.setup();
+  it("バックエンド未実装の画面はメニューに出さない", () => {
     render(<Sidebar />);
 
-    const toggle = screen.getByRole("button", { name: /その他/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // デモ中に誤って開くとエラーになる画面は、どこからもクリックできない
+    for (const label of ["授業回一覧", "学校マスタ", "教科書・単元マスタ", "形式マスタ", "生徒マスタ"]) {
+      expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
+    }
+    // 出せる項目が1つも無いので「その他」自体を表示しない
+    expect(screen.queryByRole("button", { name: /その他/ })).not.toBeInTheDocument();
+  });
 
-    expect(screen.getByRole("link", { name: "授業回一覧" })).toHaveAttribute("href", "/lessons");
-    expect(screen.getByRole("link", { name: "学校マスタ" })).toHaveAttribute("href", "/masters/schools");
-    expect(screen.getByRole("link", { name: "教科書・単元マスタ" })).toHaveAttribute("href", "/masters/textbooks");
-    expect(screen.getByRole("link", { name: "形式マスタ" })).toHaveAttribute("href", "/masters/formats");
-    expect(screen.getByRole("link", { name: "生徒マスタ" })).toHaveAttribute("href", "/masters/students");
+  it("「その他」に出す候補はフラグ側で判定している（機能自体は削除していない）", () => {
+    // ナビ定義は残っており、featureFlags を外せばそのまま復活する
+    expect(SECONDARY_NAV.length).toBeGreaterThan(0);
+    expect(SECONDARY_NAV.every((item) => isUnavailableRoute(item.href))).toBe(true);
   });
 });

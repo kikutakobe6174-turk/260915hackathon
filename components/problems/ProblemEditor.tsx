@@ -31,6 +31,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { LatexPreview } from "@/components/problems/LatexPreview";
+import { LLM_PROBLEM_DRAFT_AVAILABLE } from "@/lib/featureFlags";
 import { ApiRequestError, type ProblemDraftItemOut } from "@/lib/types/api";
 import type { Difficulty } from "@/lib/types/models";
 import { PROBLEM_STATUS_LABEL } from "@/lib/constants";
@@ -244,20 +245,23 @@ export function ProblemEditor({
       )}
 
       <div>
-        <Button
-          type="button"
-          variant="llm"
-          size="sm"
-          disabled={!unitId || !formatId}
-          onClick={() => {
-            setDraftDialogOpen(true);
-            setDrafts([]);
-            setDraftError(null);
-          }}
-        >
-          <Sparkles className="h-4 w-4" />
-          下書きを生成
-        </Button>
+        {/* /llm/problem-draft が未実装のため導線だけ隠す。実装したらフラグをtrueに戻す。 */}
+        {LLM_PROBLEM_DRAFT_AVAILABLE && (
+          <Button
+            type="button"
+            variant="llm"
+            size="sm"
+            disabled={!unitId || !formatId}
+            onClick={() => {
+              setDraftDialogOpen(true);
+              setDrafts([]);
+              setDraftError(null);
+            }}
+          >
+            <Sparkles className="h-4 w-4" />
+            下書きを生成
+          </Button>
+        )}
       </div>
 
       <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>

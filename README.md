@@ -79,6 +79,19 @@ PDFはWeb画面のスクリーンショットではありません。ReportLab�
 
 入力画像はブラウザでの確認・再試行中だけ保持し、確定時に破棄します。バックエンドは画像をファイルやDBへ保存しません。解析ジョブIDと生成ジョブIDは別々に永続化され、問題には `source: "llm"`、生成ジョブID、親の解析ジョブIDが保存されます。
 
+## MVPで非表示にしている機能
+
+バックエンドAPIが未実装で、操作するとエラーになる画面は、ナビゲーションから外してあります。ページ・ルート・APIクライアントのコードは削除していないため、対応するエンドポイントを実装したあと `lib/featureFlags.ts` の `UNAVAILABLE_ROUTES` から該当パスを外すだけで元に戻ります。
+
+| 非表示 | 未実装のAPI |
+|---|---|
+| 授業回一覧 `/lessons` | `GET/POST /lessons`, `/lessons/{id}/answer-sheets` |
+| 解答用紙・採点記録 `/answer-sheets/{id}` | `/answer-sheets/{id}`, `/attempts`, `/confirm`, `/llm/sheet-draft` |
+| 各種マスタ管理 `/masters/*` | `/schools`・`/textbooks`・`/formats`・`/units` の POST/PUT/DELETE、`/students` 一式、CSV取込 |
+| 問題編集の「下書きを生成」 | `/llm/problem-draft`（`LLM_PROBLEM_DRAFT_AVAILABLE` で制御） |
+
+上記のURLへ直接アクセスしても404や500にはならず、`(main)` レイアウトが「この機能は現在準備中です」という画面を表示します。
+
 ## 初期ユーザー（バックエンドのseedスクリプトで作成）
 
 | login_id | password | role |
